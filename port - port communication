@@ -1,0 +1,92 @@
+Got it 👍
+You have:
+Service name: vc-in055a-report
+Port: 8080
+Ingress URL: IN055Areport
+Calling service: in005a
+I’ll explain clearly and step-by-step how you should connect, and which way is best.
+1️⃣ BEST WAY (Inside Kubernetes – Service-to-Service)
+✅ Use Kubernetes Service Name + Port
+Since both services are inside the cluster, you should NOT use Ingress.
+👉 Call like this:
+Copy code
+Text
+http://vc-in055a-report:8080
+Example (from in005a)
+Copy code
+Properties
+report.service.url=http://vc-in055a-report:8080
+Copy code
+Java
+String url = reportServiceUrl + "/generateReport";
+restTemplate.postForObject(url, request, String.class);
+🔹 Why this is BEST
+Faster (no ingress hop)
+Auto load-balancing
+Works even if pods restart
+Clean microservice design
+📌 Ingress is only for external traffic, not internal service calls.
+2️⃣ Using Namespace (If services are in different namespaces)
+If:
+in005a → namespace: app-ns
+vc-in055a-report → namespace: report-ns
+Then use fully qualified service name:
+Copy code
+Text
+http://vc-in055a-report.report-ns.svc.cluster.local:8080
+Most of the time, this is not needed if both are in the same namespace.
+3️⃣ Using Ingress URL (NOT Recommended – but works)
+Your ingress name:
+Copy code
+Text
+IN055Areport
+Then call:
+Copy code
+Text
+http://IN055Areport/generateReport
+⚠️ Problems with this approach
+Slower
+Extra ingress load
+TLS / auth complications
+Breaks internal microservice best practices
+Use this only if:
+in005a is outside Kubernetes
+Or security mandates ingress-only access
+4️⃣ Environment Variable Approach (Clean Config)
+Deployment YAML
+Copy code
+Yaml
+env:
+  - name: REPORT_SERVICE_URL
+    value: http://vc-in055a-report:8080
+application.properties
+Copy code
+Properties
+report.service.url=${REPORT_SERVICE_URL}
+5️⃣ Quick Decision Table
+Scenario
+What to Use
+Both services inside K8s
+Service name + port ⭐
+Different namespaces
+FQDN
+External caller
+Ingress
+High performance
+Service name
+✅ FINAL ANSWER (For Your Setup)
+Since you have:
+Kubernetes
+Service name available
+Same functionality
+👉 Use this from in005a:
+Copy code
+Text
+http://vc-in055a-report:8080
+❌ Do NOT use ingress URL for internal calls
+If you want, I can:
+Validate your Service YAML
+Show curl test inside pod
+Explain DNS resolution in Kubernetes
+Suggest async triggering (Kafka / MQ) for report generation
+Just tell me 👍
