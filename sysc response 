@@ -1,0 +1,194 @@
+This is a very good and very important question, because the code you shared is exactly where your design problem is, and it directly explains your production instability.
+I’ll answer in 3 clear sections:
+1️⃣ What your current code is doing
+2️⃣ Is this approach acceptable for production? (short answer: NO)
+3️⃣ Main recommended design (clean, safe, scalable)
+1️⃣ What your current code is doing
+🔹 Functional behavior
+You read SYSC table from night reference DB
+Based on character positions inside syscVariable:
+Position 10–11 → D or N → Day / Night
+Position 74–75 → r → PR Night condition
+Then you manually assign a DataSource variable:
+dayDataSource
+nightDataSource
+prNightDBManager.getDataSource() (lazy + manual)
+So effectively:
+Copy code
+Text
+DB row → if/else → choose DataSource manually
+🔹 Why it “works”
+✔ Single-thread logic
+✔ Sequential execution
+✔ COBOL-style record area building
+✔ Matches legacy mainframe thinking
+That’s why this pattern feels natural in VC / COBOL integrations.
+2️⃣ Is this approach production-safe?
+❌ Short answer: NO
+❌ Long answer: It is dangerous under concurrency
+Let’s go through real problems, not theoretical ones.
+🚨 Problem 1: Manual DataSource switching inside business logic
+You are doing this:
+Copy code
+Java
+dataSource = dayDataSource;
+dataSource = nightDataSource;
+dataSource = prNightDBManager.getDataSource();
+❌ Why this is bad
+dataSource is usually a shared bean
+Multiple requests can override it
+Thread A sets DAY
+Thread B sets NIGHT
+Thread A continues execution → now uses NIGHT DB
+🔥 Silent data corruption risk
+🚨 Problem 2: Lazy PR Night DB creation + manual shutdown
+This line is the biggest red flag:
+Copy code
+Java
+DataSource dbDataSource = prNightDBManager.getDataSource();
+You already saw in production:
+Pool gets closed
+Active queries break
+All 30 connections stuck
+Pod restarts
+This comes directly from this design.
+🚨 Problem 3: DB decision logic mixed with business logic
+You are:
+Reading DB
+Deciding region
+Creating record area
+Switching DB
+Logging
+All in one block.
+❌ Impact
+Very hard to debug
+Impossible to reuse
+Any small change risks breaking DB routing
+🚨 Problem 4: String position logic without validation
+Copy code
+Java
+substring(10, 11)
+substring(74, 75)
+If:
+Row format changes
+Length is shorter
+Unexpected value comes
+You’ll get:
+StringIndexOutOfBoundsException
+Falls into RuntimeException
+Wrong DB selected silently
+🔥 Banking systems must never silently default.
+🚨 Problem 5: No transaction boundary awareness
+You decide DB after already hitting DB.
+In a proper design:
+DB selection happens before transaction starts
+Not mid-flow
+3️⃣ MAIN RECOMMENDED APPROACH (ENTERPRISE DESIGN)
+🎯 Design Goal
+Zero manual DataSource switching
+Thread-safe
+Spring-managed
+COBOL-friendly
+Production-stable
+✅ APPROACH: AbstractRoutingDataSource (CLEAN SOLUTION)
+🧩 Step 1: Isolate SYSC decision logic
+Copy code
+Java
+public enum RegionMode {
+    DAY, NIGHT, PR_NIGHT
+}
+Copy code
+Java
+public RegionMode determineRegion(Sysc sysc) {
+    String var = sysc.getSyscVariable();
+
+    if ("D".equals(var.substring(10, 11))) {
+        return RegionMode.DAY;
+    }
+
+    if ("N".equals(var.substring(10, 11)) &&
+        "r".equals(var.substring(74, 75))) {
+        return RegionMode.PR_NIGHT;
+    }
+
+    return RegionMode.NIGHT;
+}
+🧩 Step 2: Set routing context (NOT DataSource)
+Copy code
+Java
+public void setDBContext(RegionMode mode) {
+    switch (mode) {
+        case DAY:
+            DBContextHolder.set("DAY");
+            break;
+        case NIGHT:
+            DBContextHolder.set("NIGHT");
+            break;
+        case PR_NIGHT:
+            DBContextHolder.set("PR_NIGHT");
+            break;
+    }
+}
+🧩 Step 3: Routing DataSource Map
+Copy code
+Java
+targets.put("DAY", dayDataSource);
+targets.put("NIGHT", nightDataSource);
+targets.put("PR_NIGHT", prNightDataSource);
+Spring handles:
+Connection pooling
+Thread safety
+Transactions
+🧩 Step 4: Business logic stays clean
+Copy code
+Java
+RegionMode mode = determineRegion(syscRes.get(0));
+setDBContext(mode);
+
+lsRecArea = buildRecArea(mode);
+
+logger.info("REGION MODE SET TO {}", mode);
+🧩 Step 5: Clear context
+Copy code
+Java
+finally {
+    DBContextHolder.clear();
+}
+✅ Why this approach is correct
+Aspect
+Your Code
+Routing DS
+Thread safety
+❌ No
+✅ Yes
+Connection safety
+❌ Risky
+✅ Safe
+Spring lifecycle
+❌ Bypassed
+✅ Managed
+K8s stability
+❌ Pod restarts
+✅ Stable
+Debuggability
+❌ Hard
+✅ Clean
+🟢 FINAL VERDICT
+❌ Current approach
+Works functionally
+Fails under load
+Unsafe for banking production
+✅ Recommended approach
+AbstractRoutingDataSource
+ThreadLocal-based routing
+Spring-managed pools
+Zero manual close()
+⚠️ Important note for VC / COBOL
+This design:
+Is 100% compatible with COBOL calls
+Does NOT require COBOL code changes
+Only changes Java side routing
+If you want, next I can: ✔ Convert your exact code into routing-based code
+✔ Design PR Night DB as optional pool
+✔ Provide unit test & load test strategy
+Just tell me 👍
