@@ -112,10 +112,47 @@ public class PRNightDBManager {
         	
         }
     }
-    
-    
-
-    
-    
-    
 }
+
+
+
+-------------------------------------
+
+List<Sysc> syscRes = new ArrayList<Sysc>();
+					    							syscRes = syscReponight.findBySyscDetail();					    						
+					    							try {
+					    								 if (syscRes.get(0).getSyscVariable().substring(10, 11).equals("D")){
+					    									dataSource = dayDataSource;
+					    									lsRecArea = bancsTraceState.trim() + 'D' + bancsHost.trim() + fnsSysnum.trim()
+					    									+ ctrlSysnum.trim() + daySysnum.trim() + nightSysnum.trim() + non24hsum.trim() + 'D'
+					    									+ formattedmasterDB1 + formattedmasterDB2 + servicesFlag.trim() + masterDB.trim() + INSPARAM_FLAG.trim() + INSPARAM_VALUE.trim();
+					    									logger.info("-----------REGION MODE IS DAY IN DATABASE - MODE SET TO DAY DB---------- " + refno);
+					    									}
+					    								else if(syscRes.get(0).getSyscVariable().substring(10, 11).equals("N") && syscRes.get(0).getSyscVariable().substring(74, 75).equals("r"))
+					    									{
+
+					    										DataSource dbDataSource = prNightDBManager.getDataSource();
+					    										dataSource = dbDataSource;
+						    									lsRecArea = bancsTraceState.trim() + 'N'+ bancsHost.trim() + fnsSysnum.trim()
+						    									+ ctrlSysnum.trim() + daySysnum.trim() + nightSysnum.trim() + non24hsum.trim() + 'N'
+						    									+ formattedmasterDB1 + formattedmasterDB2 + servicesFlag.trim() + masterPRDB.trim() + INSPARAM_FLAG.trim() + INSPARAM_VALUE.trim();
+						    									
+						    									logger.info("-----------REGION MODE IS NIGHT IN DATABASE - MODE SET TO PR-NIGHT DB---------- " + refno);
+					    									}
+					    									
+					    									else if(syscRes.get(0).getSyscVariable().substring(10, 11).equals("N")) {
+						    									dataSource = nightDataSource;
+						    									lsRecArea = bancsTraceState.trim() + 'N'+ bancsHost.trim() + fnsSysnum.trim()
+						    									+ ctrlSysnum.trim() + daySysnum.trim() + nightSysnum.trim() + non24hsum.trim() + 'N'
+						    									+ formattedmasterDB1 + formattedmasterDB2 + servicesFlag.trim() + masterDB.trim() + INSPARAM_FLAG.trim() + INSPARAM_VALUE.trim();
+						    									
+						    									logger.info("-----------REGION MODE IS NIGHT IN DATABASE - MODE SET TO NIGHT DB---------- " + refno);
+															}
+					    									
+
+					    									}
+					    								 catch(RuntimeException e) {
+					    									
+					    									logger.info("-----------NO SYSC ENTRY IN DATABASE---------- " + refno);
+					    								}	
+
