@@ -1,0 +1,121 @@
+package com.tcs.bancs.microservices.config;
+
+import com.zaxxer.hikari.HikariDataSource;
+import com.tcs.bancs.microservices.java.validations.NOMI_Branch;
+import com.zaxxer.hikari.HikariConfig;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.time.Duration;
+import java.time.Instant;
+
+
+@Component
+public class PRNightDBManager {
+
+	Logger logger = LoggerFactory.getLogger(NOMI_Branch.class);
+	
+	
+    private final String url;
+    private final String username;
+    private final String password;
+    private final String driver;
+    private final String poolName;
+    private int maxPoolSize;
+    private int minPoolSize;
+    private long connectionTimeout;
+    private long idleTimeout;
+    private long maxLifetime;
+    private boolean registerMbeans;
+    @Value("${prnight.datasource.fixedDelay}") 
+    private long fixedDelayToShutDown;
+    
+    private volatile HikariDataSource dataSource;
+    private volatile Instant lastUsedTime;
+
+    public PRNightDBManager(
+    		
+            @Value("${prnight.datasource.jdbc-url}") String url,
+            @Value("${prnight.datasource.username}") String username,
+            @Value("${prnight.datasource.password}") String password,
+            @Value("${prnight.datasource.driver-class-name}") String driver,
+            @Value("${prnight.datasource.hikari.pool-name}") String poolName,
+            @Value("${day.datasource.hikari.maximum-pool-size}") int maxPoolSize,
+            @Value("${prnight.datasource.hikari.minimum-idle}") int minPoolSize,
+            @Value("${prnight.datasource.hikari.connectionTimeout}") long connectionTimeout,
+            @Value("${prnight.datasource.hikari.idleTimeout}") long idleTimeout,
+            @Value("${prnight.datasource.hikari.maxLifetime}") long maxLifetime,
+            @Value("${prnight.datasource.hikari.registerMbeans}") boolean registerMbeans
+           
+    ) {
+        this.url = url;
+        this.username = username;
+        this.password = password;
+        this.driver = driver;
+        this.poolName = poolName;
+        this.maxPoolSize = maxPoolSize;
+        this.minPoolSize = minPoolSize;
+        this.connectionTimeout = connectionTimeout;
+        this.idleTimeout = idleTimeout;
+        this.maxLifetime = maxLifetime;
+        this.lastUsedTime=null;
+    }
+
+    /** Lazy initialization � DB initializes only on first use */
+    public synchronized HikariDataSource getDataSource() {
+        if (dataSource == null) {
+            HikariConfig config = new HikariConfig();
+            config.setJdbcUrl(this.url);
+            config.setUsername(this.username);
+            config.setPassword(this.password);
+            config.setDriverClassName(this.driver);
+            config.setMaximumPoolSize(this.maxPoolSize);
+            config.setMinimumIdle(this.minPoolSize);
+            config.setPoolName(this.poolName);
+            config.setConnectionTimeout(this.connectionTimeout);
+            config.setIdleTimeout(this.idleTimeout);
+            config.setMaxLifetime(this.maxLifetime);
+            config.setRegisterMbeans(this.registerMbeans);
+            dataSource = new HikariDataSource(config);
+        }
+
+        lastUsedTime = Instant.now();
+        return dataSource;
+    }
+
+   // runs every 30 seconds 
+    @Scheduled(fixedDelay = 30000)
+    public synchronized void shutdownIfIdle() {
+
+        if (dataSource == null || lastUsedTime==null) return;
+
+        long idleMillis = Duration.between(lastUsedTime, Instant.now()).toMillis();
+        logger.info("lastUsedTime :"+lastUsedTime);
+        logger.info("IdleMillis :"+idleMillis);
+        
+        if (idleMillis >= fixedDelayToShutDown) { // inputed minutes idle
+           try {
+        	   dataSource.close();
+               dataSource = null;
+               logger.info("PRNight DB Pool shut down due to " + fixedDelayToShutDown/60000 + " min idle");
+           }
+           catch (RuntimeException e) {
+			logger.warn("Error in Shutting down the DB");
+		}
+           finally {
+			dataSource=null;
+		}
+        	
+        }
+    }
+    
+    
+
+    
+    
+    
+}
