@@ -192,3 +192,154 @@ If you want, next I can: ✔ Convert your exact code into routing-based code
 ✔ Design PR Night DB as optional pool
 ✔ Provide unit test & load test strategy
 Just tell me 👍
+
+----------
+
+Faster response approach 
+
+Yes 👍 — there are faster and simpler approaches, but the “best” one depends on what you want to optimize:
+⚡ Fastest response time
+🛡️ Safest under concurrency
+🏦 Banking-grade stability
+🧠 Least code change
+I’ll list all practical options, compare them, and then tell you which one is best for your VC + COBOL microservices.
+🚀 OPTION 1: Cache the SYSC decision (FASTEST RESPONSE)
+🔥 Why this is fastest
+Right now, every request hits DB to read SYSC. That DB hit itself adds:
+Network latency
+Connection usage
+COBOL wait time
+Instead → cache the region mode in memory.
+✅ How it works
+Read SYSC once
+Cache DAY / NIGHT / PR_NIGHT
+Refresh every X seconds
+Example (simple & fast)
+Copy code
+Java
+@Component
+public class RegionModeCache {
+
+    private volatile RegionMode cachedMode;
+    private volatile long lastRefreshTime = 0;
+    private static final long REFRESH_INTERVAL = 30000; // 30 sec
+
+    public RegionMode getMode() {
+        long now = System.currentTimeMillis();
+        if (cachedMode == null || now - lastRefreshTime > REFRESH_INTERVAL) {
+            synchronized (this) {
+                if (cachedMode == null || now - lastRefreshTime > REFRESH_INTERVAL) {
+                    cachedMode = loadFromDB();
+                    lastRefreshTime = now;
+                }
+            }
+        }
+        return cachedMode;
+    }
+}
+⚡ Result
+0 DB calls for most requests
+Faster TPS
+Less DB load
+Perfect for region flags (which rarely change)
+🚀 OPTION 2: AbstractRoutingDataSource + Cache (BEST OVERALL)
+🏆 This is the industry best approach
+Combine:
+Routing DataSource (safe)
+Cached region mode (fast)
+Flow:
+Copy code
+
+Request
+ → Get region from cache (no DB)
+ → Set routing key
+ → Execute business logic
+⏱ Response time
+Almost same as single-DB access
+No extra DB hit per request
+🚀 OPTION 3: DB-driven switch via Scheduled Refresh (NO runtime DB hit)
+How it works
+Scheduler runs every 1 min
+Reads SYSC
+Updates in-memory variable
+Copy code
+Java
+@Scheduled(fixedDelay = 60000)
+public void refreshRegion() {
+    cachedMode = loadFromDB();
+}
+Request path
+Copy code
+
+Request → Read in-memory flag → Done
+⚡ Extremely fast
+🚀 OPTION 4: Env / Config based switch (FASTEST, but manual)
+Example
+Copy code
+Properties
+region.mode=DAY
+Or Kubernetes ConfigMap:
+Copy code
+Yaml
+REGION_MODE: DAY
+Pros
+Zero DB hit
+Ultra fast
+Cons
+Manual change
+Not dynamic
+Used only when:
+Region change is rare
+Ops-controlled switch
+⚠️ OPTION 5: Current approach (NOT RECOMMENDED)
+Reason
+Impact
+Manual DataSource switch
+❌ Thread unsafe
+Lazy close
+❌ Pod restart
+Per-request DB read
+❌ Slow
+High coupling
+❌ Risky
+🏆 FINAL RECOMMENDATION (FOR YOU)
+Considering:
+VC + COBOL latency
+DB connection limits
+Kubernetes pods
+Banking production stability
+✅ BEST & FASTEST COMBINATION
+AbstractRoutingDataSource + Cached Region Mode (30–60 sec refresh)
+Why?
+✔ No DB hit per request
+✔ No manual pool close
+✔ Thread-safe
+✔ Fast TPS
+✔ Zero COBOL change
+🧠 Performance Comparison
+Approach
+Avg Latency
+Stability
+Manual switch
+❌ Slow
+❌ Unsafe
+Routing only
+✅ Good
+✅ Safe
+Routing + Cache
+⚡ Fastest
+🏆 Best
+ConfigMap
+⚡⚡ Fastest
+⚠️ Manual
+✅ What I strongly advise you to implement
+1️⃣ Cache SYSC region
+2️⃣ Use AbstractRoutingDataSource
+3️⃣ Remove PRNightDBManager.close() logic
+4️⃣ Enable Hikari metrics
+If you want, next I can:
+Give exact code using your SYSC substring logic
+Tune pool sizes per region
+Provide load test numbers
+Suggest K8s probe settings
+Just tell me 👍
