@@ -1,0 +1,307 @@
+<!--© Copyright 2020 Micro Focus or one of its affiliates.
+The only warranties for products and services of Micro Focus and its affiliates and licensors(“Micro Focus”) are as may be set forth in the express warranty statements accompanying such products and services.Nothing herein should be construed as constituting an additional warranty.Micro Focus shall not be liable for technical or editorial errors or omissions contained herein.The information contained herein is subject to change without notice.
+Except as specifically indicated otherwise, this document contains confidential information and a valid license is required for possession, use or copying.If this work is provided to the U.S.Government, consistent with FAR 12.211 and 12.212, Commercial Computer Software, Computer Software Documentation, and Technical Data for Commercial Items are licensed to the U.S.Government under vendor's standard commercial license.-->
+<MODEL Name="COBOL">
+	<FOLDER Name="COBOL Performance" Category="" System="False" Description="COBOL Performance includes rules to verify the code and determine where more efficient constructs could be used.">
+		<CRITERION Name="Operations with Different Decimal Precision - Conditions" Category="" System="False" ErrorCode="MFCA1101" Description="This query looks for variables within conditions that are numeric but with differing number of decimal places.  This query uses numeric fields with 0, 1, 2, 3, or 4 decimal places and looks for instances where a variable in the same condition does not have the same number of decimal places.  If your application uses fields with greater numbers of decimal places, the query can be easily modified to cover those values. Programming performance guidelines indicate that if operations are performed on operands of different types then one of these operands will be converted by the compiler. You can largely avoid conversions and improve performance by using consistent data types and by giving both operands the same usage and also appropriate PICTURE specifications.">
+			<ENTITY Name="COND" Descendants="False"/>
+			<COND Type="or">
+				<COND Type="and">
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="=">
+									<ITEM Value="0"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="&gt;">
+									<ITEM Value="1"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+				</COND>
+				<COND Type="and">
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="=">
+									<ITEM Value="1"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="&lt;&gt;">
+									<ITEM Value="1"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+				</COND>
+				<COND Type="and">
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="=">
+									<ITEM Value="2"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="&lt;&gt;">
+									<ITEM Value="2"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+				</COND>
+				<COND Type="and">
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="=">
+									<ITEM Value="3"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="&lt;&gt;">
+									<ITEM Value="3"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+				</COND>
+				<COND Type="and">
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="=">
+									<ITEM Value="4"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+					<REL Name=":Child" Op="has">
+						<ENTITY Name="VAR" Descendants="False"/>
+						<REL Name=".Instances" Op="has">
+							<ENTITY Name="DECL" Descendants="False"/>
+							<COND Type="and">
+								<ATTR Name=".Digits" Op="&gt;">
+									<ITEM Value="0"/>
+								</ATTR>
+								<ATTR Name=".Fraction" Op="&lt;&gt;">
+									<ITEM Value="4"/>
+								</ATTR>
+							</COND>
+						</REL>
+					</REL>
+				</COND>
+			</COND>
+		</CRITERION>
+		<CRITERION Name="Find PERFORM THRU Usage" Category="" System="False" ErrorCode="MFCA1119" Description="This rule finds overlapping perform ranges.">
+			<ENTITY Name="PERFORM" Descendants="False"/>
+				<REL Name=".Overlap" Op="has">
+				<ENTITY Name="PAR" Descendants="True"/>
+				</REL>
+		</CRITERION>		
+	</FOLDER>
+	<FOLDER Name="General Queries" Category="" System="False" Description="General Queries includes miscellaneous rules not covered by the other categories.">
+		<CRITERION Name="GO TO Statements Targeting non-EXIT Paragraphs" Category="" System="False" ErrorCode="MFCA1103" Description="This query is designed to find instances where a GO TO statement branches to a paragraph that is not an exit paragraph, or does not contain any type of program termination.  The result set should also be reviewed for instances of unsuitable backward branching. See the IBM 'Enterprise COBOL for z/OS Programming Guide Version 3 Release 4 SC27-1412-05' for further details.">
+			<ENTITY Name="GOTO"/>
+			<COND Type="and">
+				<REL Name=".Go to" Op="has">
+					<ENTITY Name="PAR" Descendants="True"/>
+					<COND Type="and">
+						<REL Name=":Contains" Op="hasno">
+							<ENTITY Name="STAT"/>
+							<ATTR Name=".Kind" Op="=">
+								<ITEM Value="Exit"/>
+								</ATTR>
+						</REL>
+						<REL Name=":Contains" Op="hasno">
+							<ENTITY Name="STOP"/>
+						</REL>
+						<REL Name=":Contains" Op="hasno">
+							<ENTITY Name="PORT" Descendants="False"/>
+							<ATTR Name=".PORTTYPE" Op="=">
+								<ITEM Value="XFER"/>
+								<ITEM Value="TRANS"/>
+							</ATTR>
+						</REL>
+					</COND>
+				</REL>
+				<REL Name=":IsNested" Op="hasno">
+					<ENTITY Name="EXEC" Descendants="False"/>
+				</REL>
+			</COND>
+		</CRITERION>
+		<CRITERION Name="Uninitialized Data Items" Category="" System="False" ErrorCode="MFCA1104" Description="This query will find all occurrences of Uninitialized Data Items in your program. Programming guidelines inidcate that the optimizer can recognize a data item as a constant throughout the program if it is initialized with a VALUE clause and it is not changed it anywhere in the program.">
+			<ENTITY Name="DECL" Descendants="False"/>
+			<COND Type="and">
+				<REL Name=":IsNested" Op="has">
+					<ENTITY Name="DSECTION" Descendants="False"/>
+					<ATTR Name=".Kind" Op="=">
+						<ITEM Value="WORKING-STORAGE"/>
+					</ATTR>
+				</REL>
+				<ATTR Name=".Elementary" Op="true"/>
+				<ATTR Name=".Value" Op="="/>
+			</COND>
+		</CRITERION>
+		<CRITERION Name="GO TO statement outside of PERFORMed section" Category="" System="False" ErrorCode="MFCA1120" Description="This rule finds GO TO statements outside of performed sections.">
+			<ENTITY Name="GOTO" Descendants="False"/>
+			<ATTR Name=".Defects" Op="=">
+				<ITEM Value="JUMPOUT"/>
+			</ATTR>
+		</CRITERION>		
+	</FOLDER>
+	<FOLDER Name="Coding Standards" Category="" System="False" Description="Coding Standards includes rules to help identify places in the code that could possibly violate coding standards or places in the code that might be candidates for further analysis in reducing complexity or unnecessary code.">
+		<CRITERION Name="Look for MOVE statements with loss of sign" Category="" System="False" ErrorCode="MFCA1105" Description="This query will find MOVE statements which may involve the loss of SIGN.">
+			<ENTITY Name="STAT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*SIGN*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Missing Explicit Scope Delimiters" Category="" System="False" ErrorCode="MFCA1106" Description="This query looks for statements that do not have scope terminators like END-IF .">
+			<ENTITY Name="IF" Descendants="False"/>
+			<ENTITY Name="PERFORM" Descendants="False"/>
+			<ENTITY Name="STAT" Descendants="False"/>
+			<COND Type="and">
+				<ATTR Name=".Kind" Op="=">
+					<ITEM Value="IF"/>
+					<ITEM Value="EVALUATE"/>
+					<ITEM Value="PERFORM_STAT"/>
+					<ITEM Value="SEARCH"/>
+				</ATTR>
+				<ATTR Name=".HasEnd" Op="false"/>
+			</COND>
+		</CRITERION>
+		<CRITERION Name="ALTER Statements" Category="" System="False" ErrorCode="MFCA1108" Description="This query will find ALTER statements in your program. Programming guidelines indicate that by using structured programming statements, such as EVALUATE and inline PERFORM, instead of ALTER ensures that your program is more comprehensible and has a more linear control flow. As a result, the optimizer can operate over larger regions of the program which gives you more efficient code at run time.">
+			<ENTITY Name="ALTER" Descendants="False"/>
+		</CRITERION>
+	</FOLDER>
+	<FOLDER Category="" Name="Within Entire Program" System="False" Description="Within Entire Program includes rules to check the code across an entire application such as queries for finding unexecuted statements, unreachable paragraphs or data that is defined but is never used.">
+		<CRITERION Name="Dead Statements" Category="" System="False" ErrorCode="MFCA1109" Description="This query finds statements that are not reachable. ">
+			<ENTITY Name="STAT" Descendants="True"/>
+			<COND Type="and">
+				<ATTR Name=".Dead" Op="true"/>
+				<REL Name=":Parent" Op="hasno">
+					<ENTITY Name="STAT" Descendants="True"/>
+				</REL>
+			</COND>
+		</CRITERION>
+		<CRITERION Name="Unused Data" Category="" System="False" ErrorCode="MFCA1110" Description="This query find data items that are defined and never used in the PROCEDURE DIVISION.">
+			<ENTITY Name="DECL"/>
+			<ATTR Name=".Dead" Op="true"/>
+		</CRITERION>
+	</FOLDER>		
+	<FOLDER Name="64 Bit Readiness" Category="" System="False" Description="64 Bit Readiness includes rules to help check whether the code is going to perform as expected when compiled for 64-bit platforms.">
+		<CRITERION Name="Modification of Pointers by Implicit Redefinition" Category="" System="True" ErrorCode="MFCA1111" Description="Modification of group item containing a pointer is unsafe, as the memory occupied by the pointer is treated as an alphanumeric data item. In other words, if you move a non-pointer to a group item containing a pointer, pointer problems could exist.\nFor example, the MOVE statement here would be highlighted as unsafe:\n       01  ppg.\n         05  pp          usage procedure-pointer.\n\n       set pp            to entry 'foobar'\n       move low-values   to ppg.\n">
+			<ENTITY Name="STAT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*IMPLREDEF*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Possible Pointer Modification Via CALL Statements and Prototypes" Category="" System="True" ErrorCode="MFCA1112" Description="Pointer modification can occur when CALL statements are used because any pointers provided as parameters can be effectively redefined to alphanumeric.  To avoid this situation, call prototypes would need to be used.  Further details are available in the product documentation.\nFor example, without using a call prototype, the following CALL statement would cause the ptr item to be redefined:\n       01  ptr               usage pointer.\n\n       call 'CBL_ALLOC_MEM'  using ptr\n">
+			<ENTITY Name="PORT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*MODCALLPROT*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Explicit Definitions of Pointers in Call Prototypes" Category="" System="True" ErrorCode="MFCA1113" Description="When call prototypes are being used to define the API to a callable routine, then any mismatch between what is passed and what is expected will be highlighted as a potential issue if any parameters are defined as pointers.  If a pointer is expected by an API, then a pointer must be given.\nFurther details are available in the product documentation in the CALL prototype chapter.\n">
+			<ENTITY Name="PORT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*EXPCALLPROT*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Implicit Definitions of Pointers in Call Prototypes" Category="" System="True" ErrorCode="MFCA1114" Description="Similar to Explicit Definition of Pointers in Call Prototypes, when using CALL prototypes, any operations which change the value of the memory occupied by an implicitly defined pointer which are not consistent with pointer usage will be flagged as needing attention.\nFurther details are available in the product documentation in the CALL prototype chapter.\n">
+			<ENTITY Name="STAT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*IMPCALLPROT*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Constant Indexing" Category="" System="True" ErrorCode="MFCA1115" Description="Identify potential pointer problems when a pointer item is modified by static indexing.\nFor example, the MOVE statement in the following program snippet would be marked as potentially needing attention:\n       01  p1.\n         02  item1  occurs 2 indexed by i1.\n           05  item1-1    pic x(ptr-size).\n           05  item1-2    pic x(ptr-size) occurs 2 indexed by i2.\n       01  p2 redefines p1.\n           05  pic x(ptr-size) occurs 3.\n           05  ptr2-notmod-1    usage pointer.\n           05  ptr2-mod-1       usage pointer.\n           05  ptr2-mod-2       usage pointer.\n       \n       move ' '         to item1-2(2,1)\n">
+			<ENTITY Name="STAT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*CONSTINDEX*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Variable Indexing" Category="" System="True" ErrorCode="MFCA1116" Description="Identify potential pointer problems when a pointer item is modified by variable indexing.\nFor example, the MOVE statement in the following program snippet would be marked as potentially needing attention:\n       01  p1.\n          02  item1  occurs 2 indexed by i1.\n           05  item1-1         pic x(ptr-size).\n           05  item1-2         pic x(ptr-size) occurs 2 indexed by i2.\n       01  p2 redefines p1.\n              05         pic x(ptr-size) occurs 3.\n              05  ptr2-notmod-1    usage pointer.\n              05  ptr2-mod-1       usage pointer.\n              05  ptr2-mod-2       usage pointer.\n       \n       move ' '         to item1-2(i1,i2)\n">			<ENTITY Name="STAT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*VARINDEX*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Constant Reference Modification" Category="" System="True" ErrorCode="MFCA1117" Description="Identify potential pointer problems when modifying items containing pointers by constant reference.\nFor example, in the program below, the second MOVE statement would be marked as potentially needing attention:\n       01  p1.\n          05               pic x(16).\n          05  ptr2-1       usage pointer.\n          05  ptr2-2       usage pointer.\n\n       move ' '       to p1(1:16)\n       move ' '       to p1(1:17)\n">
+			<ENTITY Name="STAT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*CONSTREFMOD*"/>
+			</ATTR>
+		</CRITERION>
+		<CRITERION Name="Variable Reference Modification" Category="" System="True" ErrorCode="MFCA1118" Description="Identify potential pointer problems when modifying items which contain pointers with variable references.\nFor example, in the program below, both MOVE statements would be marked as potentially needing attention:\n       01  refm             pic x comp-x.\n       01  p1.\n          05                pic x(16).\n          05  ptr2-1        usage pointer.\n          05  ptr2-2        usage pointer.\n\n       move ' '         to p1(refm:1)\n       move ' '         to p1(1:refm)\n">
+			<ENTITY Name="STAT" Descendants="False"/>
+			<ATTR Name=".Defects" Op="Like">
+				<ITEM Value="*VARREFMOD*"/>
+			</ATTR>
+		</CRITERION>
+	</FOLDER>		
+</MODEL>
