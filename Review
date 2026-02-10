@@ -584,3 +584,324 @@ public class ShortEnquiryService {
 	   return new ResponseEntity(finalResponse, HttpStatus.OK); 
 	}   
 }
+
+
+--------------------------------------
+
+package com.tcs.bancs.microservices.services;
+
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutionException;
+
+import com.microfocus.cobol.runtimeservices.RunUnit;
+
+import javax.sql.DataSource;
+
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400;
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400.Ls400AccountNumber;
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400.Ls400Opt1Output;
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400.Ls400OptionCode;
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400.LsBranchNumber;
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400.LsErrorNumber;
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400.LsRecordArea;
+import com.tcs.bancs.microservices.jvm.enquiry.JVM400.LsTellerNumber;
+
+public class ShortEnquiryService_Child {
+	
+	Logger logger = LoggerFactory.getLogger(ShortEnquiryService_Child.class);
+	
+	
+	public List<String> callShortEnquiryChild(String accno, String opcode, String tellerno, String branchno, String recarea,String refno, DataSource datasource) throws InterruptedException, ExecutionException, SQLException {
+		
+		String errno = new String();
+		String outres = new String();
+		List<String> resList = new ArrayList<>();
+		
+		String formattedTeller = tellerno.length() >= 7 ? tellerno.substring(tellerno.length() - 7) : tellerno;
+		
+		JVM400					jvm400			=	new JVM400();
+		Ls400AccountNumber		acctnumber		=	new Ls400AccountNumber();
+		Ls400OptionCode			optioncode		=   new Ls400OptionCode();
+		LsErrorNumber			errornumber		=	new LsErrorNumber();
+		LsRecordArea			lsrecordarea	=	new	LsRecordArea();
+		LsTellerNumber			tellernum		=	new	LsTellerNumber();
+		LsBranchNumber			branchnum		=	new LsBranchNumber();
+		Ls400Opt1Output         out_response    =	new Ls400Opt1Output();
+		logger.info("VC------------------------ShortEnquiryService_Child Service Started------------------------VC" + refno);
+		
+		acctnumber.setLs400AccountNumber(StringUtils.leftPad(accno, 17, "0"));
+		optioncode.setLs400OptionCode(opcode);
+		tellernum.setLsTellerNumber(formattedTeller);
+		branchnum.setLsBranchNumber(branchno);
+		lsrecordarea.setLsRecordArea(recarea);
+		
+		 RunUnit run1 = new RunUnit();
+		 logger.info("VC------------------------Initiating DB Pooling------------------------VC " + refno);
+		 try (Connection connection = datasource.getConnection()){
+			 
+				
+	            run1.Add(jvm400);
+	    		run1.Call("JVM400", acctnumber.get_Reference(),
+	    				optioncode.get_Reference(),
+	    				tellernum.get_Reference(),
+	    				branchnum.get_Reference(),
+	    				out_response.get_Reference(),
+	    				errornumber.get_Reference(),
+	    				lsrecordarea.get_Reference(),
+	    				connection
+	    				);
+	    		
+	    	errno = errornumber.getLsErrorNumber();
+	    	outres = out_response.getLs400Opt1Output();
+		
+	    	run1.close();
+	    	resList.add(outres);
+	    	resList.add(errno);
+		
+		return resList;
+	}
+
+}
+}
+-------------------------------------------------------------------------------
+
+//           SBI Core Banking Project, Hyderabad, India.          *
+//*****************************************************************
+//                                                                *
+//  	           PROGRAM - MigenqDetailsRepositoryImpl.Java                 
+//                                                                *
+//*****************************************************************
+//                 P R O G R A M    H I S T O R Y                 *
+//                                                                *
+//   PROGRAMMER    :    DATE       :  SPR NO   :   COMMENTS       *
+//----------------------------------------------------------------*
+//Niharika Tammana : 15/10/2024    : xxxxxxxx  :  MICROSERVICES   *
+//Naga Sai Ganesh  : 15/10/2024    : xxxxxxxx  :  MICROSERVICES   *
+//Niharika Tammana : 24/01/2025    : 25010222  :  MICROSERVICES   *
+//----------------------------------------------------------------*
+package com.tcs.bancs.microservices.impl;
+
+import java.io.IOException;
+import java.sql.Clob;
+import java.sql.SQLException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
+import javax.sql.rowset.serial.SerialException;
+
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import com.tcs.bancs.microservices.db.model.Migenq_t1;
+import com.tcs.bancs.microservices.db.model.Migenq_t2;
+import com.tcs.bancs.microservices.db.model.Migenq_t3;
+import com.tcs.bancs.microservices.db.model.Migenqpk_t1;
+import com.tcs.bancs.microservices.db.model.Migenqpk_t2;
+import com.tcs.bancs.microservices.db.model.Migenqpk_t3;
+import com.tcs.bancs.microservices.exception.RrnException;
+import com.tcs.bancs.microservices.exception.SrcException;
+
+import com.tcs.bancs.microservices.repository.ref.Migenq_t1DetailRefRepo;
+import com.tcs.bancs.microservices.repository.ref.Migenq_t2DetailRefRepo;
+import com.tcs.bancs.microservices.repository.ref.Migenq_t3DetailRefRepo;
+
+@Service
+public class MigenqDetailsRepositoryImpl {
+
+	private final Migenq_t1DetailRefRepo dayRepo1;
+	private final Migenq_t2DetailRefRepo dayRepo2;
+	private final Migenq_t3DetailRefRepo dayRepo3;
+	
+
+	public MigenqDetailsRepositoryImpl(Migenq_t1DetailRefRepo dayRepo1, Migenq_t2DetailRefRepo dayRepo2,
+			Migenq_t3DetailRefRepo dayRepo3) {
+		super();
+		this.dayRepo1 = dayRepo1;
+		this.dayRepo2 = dayRepo2;
+		this.dayRepo3 = dayRepo3;
+	}
+	Logger logger = LoggerFactory.getLogger(MigenqDetailsRepositoryImpl.class);
+	public void saveToLogDB(String REQ_STR, String CLIENT_IP, String TELLER_ID, String PK_REQ_REF_NO, String SRC_ID, String RECD_TIME, String IP_ADDRESS, String ERROR_CODE, String ERROR_DESCRIPTION, String RESPONSE_STATUS, String RESPONSE_STRING, String RESP_STR) throws SerialException, SQLException, IOException, RrnException, SrcException {
+		
+		 
+		DateTimeFormatter entryDate = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss:SSS");
+		DateTimeFormatter entryDate1 = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+		LocalDateTime time = LocalDateTime.now();
+		LocalDate date = LocalDate.now();	
+		logger.info("VC------------------BEFORE LOG DB save done------------------VC");
+	       int dayCount = date.getDayOfMonth();
+	       int Logsaver = dayCount%3;
+	       
+		if (PK_REQ_REF_NO == null || PK_REQ_REF_NO.length() >= 26 || PK_REQ_REF_NO.isEmpty()) {
+			PK_REQ_REF_NO = " ";
+		}	
+		if (SRC_ID == null || SRC_ID.length() > 10 || SRC_ID.isEmpty()) {
+			SRC_ID = " ";
+		}
+		
+		if(!PK_REQ_REF_NO.equals(" ")) {
+			SRC_ID = " ";
+		}
+		if((PK_REQ_REF_NO.contains(" ") && PK_REQ_REF_NO.length() >= 5) || PK_REQ_REF_NO.length() >= 5) {
+			SRC_ID = PK_REQ_REF_NO.substring(3,5);
+		}
+		else if(PK_REQ_REF_NO.length() == 4) {
+			SRC_ID = PK_REQ_REF_NO.substring(3,4);
+		}
+		else {
+			SRC_ID = " ";
+		}
+		
+		if (ERROR_CODE == null || ERROR_CODE.isEmpty()) {
+			ERROR_CODE = " ";
+		}
+		if (ERROR_DESCRIPTION == null || ERROR_DESCRIPTION.isEmpty()) {
+			ERROR_DESCRIPTION = " ";
+		}
+		
+		if(REQ_STR == null || REQ_STR.isEmpty()) {
+			REQ_STR = " ";
+		}
+
+	        if (Logsaver == 1) {
+	            Migenq_t1 mig = new Migenq_t1();
+	            Migenqpk_t1 pk = new Migenqpk_t1();
+
+	            pk.setPK_REQ_REF_NO(PK_REQ_REF_NO);
+	            mig.setSRC_ID(SRC_ID);
+	            if (IP_ADDRESS == null || IP_ADDRESS.isEmpty() || IP_ADDRESS.length() > 20) {
+	                mig.setCLIENT_IP(" ");
+	            } else {
+	                mig.setCLIENT_IP(IP_ADDRESS);
+	            }
+	            if (TELLER_ID == null || TELLER_ID.isEmpty() || TELLER_ID.length() < 1 || TELLER_ID.matches(" ")) {
+	                mig.setTELLER_ID(" ");
+	            } else if (TELLER_ID.length() > 10) {
+	                mig.setTELLER_ID(TELLER_ID.substring(TELLER_ID.length() - 10, TELLER_ID.length()));
+	            //START OF IR 25010222
+//	            } else if(StringUtils.isNumeric(TELLER_ID)) {
+	            } else if(StringUtils.isNumeric(TELLER_ID) && TELLER_ID.length() != 10) {
+	            //END OF IR 25010222
+	            	 mig.setTELLER_ID(String.format("%010d", Integer.parseInt(TELLER_ID)));
+	             }
+	            else {
+	                mig.setTELLER_ID(TELLER_ID);
+	            }
+
+
+	            mig.setENTRY_DATE(entryDate1.format(time));
+	            mig.setTXN_NO("CBSV000010");
+	            mig.setTXN_NAME("ShortEnquiryService");
+	            mig.setREQ_STR(REQ_STR);
+				mig.setRESPONSE_STATUS(RESPONSE_STATUS);
+				mig.setERROR_CODE(ERROR_CODE);
+				mig.setERROR_DESCRIPTION(ERROR_DESCRIPTION);
+				mig.setRESP_STR(RESP_STR);
+	            pk.setRECD_TIME(RECD_TIME);	            
+				Clob clob=new javax.sql.rowset.serial.SerialClob(RESPONSE_STRING.toCharArray());
+		        mig.setRESPONSE_STRING(clob);
+	            mig.setMigpk(pk);
+	            time = LocalDateTime.now();
+	            mig.setRESP_TIME(entryDate.format(time));
+	            dayRepo1.save(mig);
+	            logger.info("VC------------------LOG DB save done------------------VC");
+	            
+	        } else if (Logsaver == 2) {
+	            Migenq_t2 mig2 = new Migenq_t2();
+	            Migenqpk_t2 pk2 = new Migenqpk_t2();
+	            pk2.setPK_REQ_REF_NO(PK_REQ_REF_NO);
+	            mig2.setSRC_ID(SRC_ID);
+	            if (IP_ADDRESS == null || IP_ADDRESS.isEmpty() || IP_ADDRESS.length() > 20) {
+	                mig2.setCLIENT_IP(" ");
+	            } else {
+	                mig2.setCLIENT_IP(IP_ADDRESS);
+	            }
+	            if (TELLER_ID == null || TELLER_ID.isEmpty() || TELLER_ID.length() < 1 || TELLER_ID.matches(" ")) {
+	                mig2.setTELLER_ID(" ");
+	            } else if (TELLER_ID.length() > 10) {
+	                mig2.setTELLER_ID(TELLER_ID.substring(TELLER_ID.length() - 10, TELLER_ID.length()));
+	             //START OF IR 25010222
+//	             } else if(StringUtils.isNumeric(TELLER_ID)) {
+	             } else if(StringUtils.isNumeric(TELLER_ID)  && TELLER_ID.length() != 10) {
+	             //END OF IR 25010222
+	            	 mig2.setTELLER_ID(String.format("%010d", Integer.parseInt(TELLER_ID)));
+	             }
+	            else {
+	                mig2.setTELLER_ID(TELLER_ID);
+	            }
+
+	            mig2.setENTRY_DATE(entryDate1.format(time));
+	            mig2.setTXN_NO("CBSV000010");                    
+	            mig2.setTXN_NAME("ShortEnquiryService");      
+	            mig2.setREQ_STR(REQ_STR);                      
+				mig2.setRESPONSE_STATUS(RESPONSE_STATUS);                  
+				mig2.setERROR_CODE(ERROR_CODE);                
+				mig2.setERROR_DESCRIPTION(ERROR_DESCRIPTION);                      
+				mig2.setRESP_STR(RESP_STR);                          
+	            pk2.setRECD_TIME(RECD_TIME);
+	            mig2.setRESP_TIME(entryDate.format(time));
+	            mig2.setMigpk(pk2);
+				Clob clob=new javax.sql.rowset.serial.SerialClob(RESPONSE_STRING.toCharArray());
+		        mig2.setRESPONSE_STRING(clob);
+		        time = LocalDateTime.now();
+	            mig2.setRESP_TIME(entryDate.format(time));
+	            dayRepo2.save(mig2);
+	            logger.info("VC------------------LOG DB save done------------------VC");
+
+	        } else if (Logsaver == 0) {
+	            Migenq_t3 mig3 = new Migenq_t3();
+	            Migenqpk_t3 pk3 = new Migenqpk_t3();
+
+	            pk3.setPK_REQ_REF_NO(PK_REQ_REF_NO);
+	            mig3.setSRC_ID(SRC_ID);
+	            if (IP_ADDRESS == null || IP_ADDRESS.isEmpty() || IP_ADDRESS.length() > 20) {
+	                mig3.setCLIENT_IP(" ");
+	            } else {
+	                mig3.setCLIENT_IP(IP_ADDRESS);
+	            }
+	            if (TELLER_ID == null || TELLER_ID.isEmpty() || TELLER_ID.length() < 1 || TELLER_ID.matches(" ")) {
+	                mig3.setTELLER_ID(" ");
+	            } else if (TELLER_ID.length() > 10) {
+	                mig3.setTELLER_ID(TELLER_ID.substring(TELLER_ID.length() - 10, TELLER_ID.length()));
+	             //START OF IR 25010222
+//	            } else if(StringUtils.isNumeric(TELLER_ID)) {
+	            } else if(StringUtils.isNumeric(TELLER_ID) && TELLER_ID.length() != 10) {
+	            //END OF IR 25010222
+	            	 mig3.setTELLER_ID(String.format("%010d", Integer.parseInt(TELLER_ID)));
+	             }
+	            else {
+	                mig3.setTELLER_ID(TELLER_ID);
+	            }
+
+	            
+	            mig3.setENTRY_DATE(entryDate1.format(time));
+			    mig3.setTXN_NO("CBSV000010");                  	
+			    mig3.setTXN_NAME("ShortEnquiryService");    								
+			    mig3.setREQ_STR(REQ_STR);                    	
+			    mig3.setRESPONSE_STATUS(RESPONSE_STATUS);                	
+			    mig3.setERROR_CODE(ERROR_CODE);              	
+			    mig3.setERROR_DESCRIPTION(ERROR_DESCRIPTION);                    	
+			    mig3.setRESP_STR(RESP_STR);   
+			    pk3.setRECD_TIME(RECD_TIME);
+				mig3.setRESP_TIME(entryDate.format(time));
+				mig3.setMigpk(pk3);
+				Clob clob=new javax.sql.rowset.serial.SerialClob(RESPONSE_STRING.toCharArray());
+		        mig3.setRESPONSE_STRING(clob);
+	            time = LocalDateTime.now();
+	            mig3.setRESP_TIME(entryDate.format(time));
+		        dayRepo3.save(mig3);
+		        logger.info("VC------------------LOG DB save done------------------VC");
+			}
+	}
+}
+
