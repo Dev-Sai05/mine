@@ -1,0 +1,2280 @@
+package com.tcs.bancs.microservices.services;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+import com.tcs.bancs.microservices.db.model.Sysc;
+import com.tcs.bancs.microservices.repository.night.SyscDetailNightRepo;
+
+@Service
+public class SyscScheduler {
+	Logger LOGGER = LoggerFactory.getLogger(SyscScheduler.class);
+	@Autowired
+	SyscDetailNightRepo syscReponight;
+	
+	public volatile boolean NightEnabled;
+	public volatile boolean NightDay;
+	public volatile boolean NightRef;
+
+	public boolean isNightEnabled() {
+		return NightEnabled;
+	}
+
+	public void setNightEnabled(boolean nightEnabled) {
+		NightEnabled = nightEnabled;
+	}
+
+	public boolean isNightDay() {
+		return NightDay;
+	}
+
+	public void setNightDay(boolean nightDay) {
+		NightDay = nightDay;
+	}
+
+	public boolean isNightRef() {
+		return NightRef;
+	}
+
+	public void setNightRef(boolean nightRef) {
+		NightRef = nightRef;
+	}
+
+	//@Scheduled(fixedDelay = 1000)
+	public void refreshSysc() {
+
+		List<Sysc> syscRes = new ArrayList<Sysc>();
+		syscRes = syscReponight.findBySyscDetail();
+		if (syscRes.get(0).getSyscVariable().substring(10, 11).equals("D")) {
+			NightEnabled = false;
+			NightRef = false;
+			NightDay = false;
+			LOGGER.info("Data Fetch from Day DB");
+		} else if (syscRes.get(0).getSyscVariable().substring(10, 11).equals("N")
+				&& syscRes.get(0).getSyscVariable().substring(74, 75).equals("r")) {
+			NightEnabled = true;
+			NightRef = true;
+			NightDay = false;
+			LOGGER.info("Data Fetch from night/Ref DB");
+		} else if (syscRes.get(0).getSyscVariable().substring(10, 11).equals("N")) {
+			NightEnabled = true;
+			NightDay = true;
+			NightRef = false;
+			LOGGER.info("Data Fetch from night/Day DB after");
+		}
+	}
+
+}
+
+
+
+
+--------------------------------------------------------
+
+
+package com.tcs.bancs.microservices.services;
+
+import java.text.SimpleDateFormat;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Date;
+import java.util.InputMismatchException;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Properties;
+import java.util.stream.Collectors;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.sql.rowset.serial.SerialException;
+
+import org.apache.commons.lang.exception.ExceptionUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.tcs.bancs.microservices.RequestBean_msbalance;
+import com.tcs.bancs.microservices.config.CacheConfig;
+import com.tcs.bancs.microservices.configuration.PropertyLoader;
+import com.tcs.bancs.microservices.db.model.Cusm;
+import com.tcs.bancs.microservices.db.model.Cusvcc;
+import com.tcs.bancs.microservices.db.model.Depp;
+import com.tcs.bancs.microservices.db.model.Invm;
+import com.tcs.bancs.microservices.db.model.Telm;
+import com.tcs.bancs.microservices.exception.RrnException;
+import com.tcs.bancs.microservices.exception.RuleAccessTechnicalException;
+import com.tcs.bancs.microservices.exception.SrcException;
+import com.tcs.bancs.microservices.impl.MigenqDetailsRepositoryImpl;
+import com.tcs.bancs.microservices.repository.day.CusmDetailDayRepo;
+import com.tcs.bancs.microservices.repository.day.CusvccDetailDayRepo;
+import com.tcs.bancs.microservices.repository.day.DeppDetailDayRepo;
+import com.tcs.bancs.microservices.repository.day.InvmDetailDayRepo;
+import com.tcs.bancs.microservices.repository.day.TelmDetailDayRepo;
+import com.tcs.bancs.microservices.repository.night.CusmDetailNightRepo;
+import com.tcs.bancs.microservices.repository.night.CusvccDetailNightRepo;
+import com.tcs.bancs.microservices.repository.night.InvmDetailNightRepo;
+import com.tcs.bancs.microservices.repository.night.SyscDetailNightRepo;
+import com.tcs.bancs.microservices.repository.ref.CusmDetailRefRepo;
+import com.tcs.bancs.microservices.repository.ref.CusvccDetailRefRepo;
+import com.tcs.bancs.microservices.repository.ref.DeppDetailRefRepo;
+import com.tcs.bancs.microservices.repository.ref.InvmDetailRefRepo;
+import com.tcs.bancs.microservices.repository.ref.TelmDetailRefRepo;
+import com.tcs.bancs.microservices.service.response.model.CASAodAcctDetails;
+import com.tcs.bancs.microservices.service.response.model.CCODAcctDetails;
+import com.tcs.bancs.microservices.service.response.model.DltlAcctBean;
+import com.tcs.bancs.microservices.service.response.model.InvalidAccountDetails;
+import com.tcs.bancs.microservices.service.response.model.MSbalnceEnqResponse;
+import com.tcs.bancs.microservices.service.response.model.TDR_STDRAcctDetails;
+import com.tcs.bancs.microservices.util.CalculateCheckDigit;
+import com.tcs.bancs.microservices.util.FrameworkConstants;
+import com.tcs.bancs.microservices.utils.tcs.ErrorMessage;
+
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+
+@RestController
+@Api(value = "Aggregation_API", description = " ", tags = { "Aggregation API" })
+@RequestMapping("/")
+@CacheEvict
+public class MSbalanceEnq {
+
+	private static boolean filterFlag = false;
+	private static Logger logger = LoggerFactory.getLogger(MSbalanceEnq.class);
+	private static final SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss:SSS");
+
+	String ErrorCodeMasterFilePath = CacheConfig.frameworkConfigProperties
+			.getProperty(FrameworkConstants.LOOKUP_FILES_PATH);
+
+	Properties error = PropertyLoader
+			.readPropertyFile(new String(ErrorCodeMasterFilePath + "/ErrorCodeMaster.properties"));
+
+	@Autowired
+	MigenqDetailsRepositoryImpl migDetails;
+
+	@Autowired
+	TelmDetailDayRepo telmDetailDayRepo;
+	@Autowired
+	TelmDetailRefRepo telmDetailRefRepo;
+
+	@Autowired
+	CusmDetailDayRepo cusmDetailDayRepo;
+	@Autowired
+	CusmDetailRefRepo cusmDetailRefRepo;
+	@Autowired
+	CusmDetailNightRepo cusmDetailNightRepo;
+	
+
+	@Autowired
+	SyscDetailNightRepo syscReponight;
+
+	@Autowired
+	InvmDetailDayRepo invmDayRepo;
+
+	@Autowired
+	InvmDetailNightRepo invmNightRepo;
+	
+	@Autowired
+	InvmDetailRefRepo invmRefRepo;
+
+	@Autowired
+	DeppDetailDayRepo deppDayRepo;
+	@Autowired
+	DeppDetailRefRepo deppRefRepo;
+
+	@Autowired
+	DEPaccountDetailsAcct depacct;
+
+	@Autowired
+	LONaccountDetailsCIF lonRepo;
+
+	@Autowired
+	DEPaccountDetailsCIF depRepo;
+
+	@Autowired
+	CusvccDetailDayRepo cusvccDetailDayRepo;
+	@Autowired
+	CusvccDetailRefRepo cusvccDetailRefRepo;
+	@Autowired
+	CusvccDetailNightRepo cusvccDetailNightRepo;
+
+	@Autowired
+	LONaccountDetailsAcct lonacct;
+	
+	@Autowired
+	SyscScheduler syscScheduler;
+	
+
+	@SuppressWarnings({ "rawtypes", "unchecked", "static-access", "unused" })
+	@ApiOperation(value = "Retrieve Customer Details", notes = "Retrieve Customer Details:This API is used to fetch CBS6_Enq.", response = MSbalnceEnqResponse.class)
+	@PostMapping(value = { "/msbalance-enq" }, produces = { "application/json" })
+	@CrossOrigin()
+	@JsonIgnore
+
+	public ResponseEntity<String> getE1msDetails(@RequestBody(required = true) RequestBean_msbalance reqbean,
+			HttpServletRequest request, @RequestHeader HttpHeaders headers, HttpServletResponse response)
+			throws SerialException, Exception {
+		Instant time = Instant.now();
+		Date date = Date.from(time);
+		String entryDate = format.format(date);
+		logger.info("Start Date and Time>>>>>>>>>" + entryDate);
+		String remoteAddress = request.getRemoteAddr();
+		response.setHeader("X-Content-Type-Options", "nosniff");
+		response.setHeader("X-Frame-Options", "DENY");
+		response.setHeader("Content-Security-Policy", "default-src 'self'");
+		response.setHeader("X-XSS-Protection", "1;mode=block");
+		response.setHeader("Cache-control", "no-cache,no-store");
+		MSbalnceEnqResponse resp = new MSbalnceEnqResponse();
+		Gson gson = new Gson();
+		String reqbeanstr = "";
+		String finalResponse = "";
+		String ReqRefNo = new String();
+		String accountNumber = "";
+		List<String> AcctNo = new ArrayList<>();
+		String SourceId = "";
+		String CLIENT_IP = request.getHeader("X-Forwarded-For");
+		StringUtils stringUtils = new StringUtils();
+		String tellerNo = "";
+		String BranchNo = "";
+		String sign_on_flag = "";
+		String CustomerNo = "";
+		String AccountType = "";
+		String acctStatus = "";
+		ErrorMessage msbalenq = new ErrorMessage();
+		
+		boolean accttypeflag = true;
+
+		List<DltlAcctBean> LonAcctBeanList = new ArrayList<DltlAcctBean>();
+		List<CASAodAcctDetails> DepAcctBeanList = new ArrayList<CASAodAcctDetails>();
+		List<CCODAcctDetails> DepAcctODBeanList = new ArrayList<CCODAcctDetails>();
+		List<TDR_STDRAcctDetails> TDRAcctBeanList = new ArrayList<TDR_STDRAcctDetails>();
+		List<DltlAcctBean> filterlistDLTLGTR = new ArrayList<DltlAcctBean>();
+		List<DltlAcctBean> filterlistDLTLGTRnew = new ArrayList<DltlAcctBean>();
+		List<DltlAcctBean> filterlist2DLTL = new ArrayList<DltlAcctBean>();
+		List<CASAodAcctDetails> filterlistCASAODGTR = new ArrayList<CASAodAcctDetails>();
+		List<CASAodAcctDetails> filterlistCASAODGTRnew = new ArrayList<CASAodAcctDetails>();
+		List<CASAodAcctDetails> filterlist2CASAOD = new ArrayList<CASAodAcctDetails>();
+		List<CCODAcctDetails> filterlistCCODGTR = new ArrayList<CCODAcctDetails>();
+		List<CCODAcctDetails> filterlistCCODGTRnew = new ArrayList<CCODAcctDetails>();
+		List<CCODAcctDetails> filterlist2CCOD = new ArrayList<CCODAcctDetails>();
+		List<TDR_STDRAcctDetails> filterlistTDRGTR = new ArrayList<TDR_STDRAcctDetails>();
+		List<TDR_STDRAcctDetails> filterlistTDRGTRnew = new ArrayList<TDR_STDRAcctDetails>();
+		List<TDR_STDRAcctDetails> filterlist2TDRGTR = new ArrayList<TDR_STDRAcctDetails>();
+		String MigReqStr = "Internal Calling-Please Check Reference Number Response String";
+
+		logger.info("*****************INSIDE  MS BALANCE SERVICE*****************");
+		try {
+
+			if (reqbean != null) {
+				List<String> requestData = reqbean.getACCOUNT_NUMBER();
+				AccountType = reqbean.getACCOUNT_TYPE();
+				CustomerNo = reqbean.getCUSTOMER_NUMBER();
+				ReqRefNo = reqbean.getREQUEST_REFERENCE_NUMBER();
+				SourceId = reqbean.getSOURCE_ID();
+				acctStatus = reqbean.getACCOUNT_STATUS();
+				tellerNo = reqbean.getREQUEST_TELLER_ID();
+				BranchNo = reqbean.getBRANCH_CODE();
+				String accept = request.getHeader("Content-Type");
+				AcctNo = reqbean.getACCOUNT_NUMBER();
+
+				List<InvalidAccountDetails> invalidacctList = new ArrayList<>();
+
+				CalculateCheckDigit calculateCheckDigit = new CalculateCheckDigit();
+				if (tellerNo != null && StringUtils.isNumeric(tellerNo)) {
+					tellerNo = StringUtils.leftPad(tellerNo, 16, "0");
+				}
+				if (ReqRefNo == null || ReqRefNo.length() != 25) {
+					logger.error("Reveiced Req Ref number is invalid 1,  received ref number is: {}", ReqRefNo);
+					resp.setERROR_CODE("CB460");
+					resp.setERROR_DESCRIPTION(error.getProperty("CB460"));
+					resp.setSOURCE_ID(SourceId);
+					resp.setRESPONSE_STATUS("1");
+					resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+					finalResponse = gson.toJson(resp);
+					customFilter(finalResponse);
+					reqbeanstr = gson.toJson(reqbean).toString();
+					migDetails.LogData("1", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+							remoteAddress, tellerNo, "CB460", error.getProperty("CB460"),
+							reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(), msbalenq.getFail(),
+							entryDate, CLIENT_IP);
+					if (filterFlag = true) {
+						return new ResponseEntity(finalResponse, HttpStatus.OK);
+					}
+
+				} else {
+					// SBI-XX-YY-DDD-hh-MM-sss-NNNNNNNN
+					String sbi = ReqRefNo.substring(0, 3);
+					String s = ReqRefNo.substring(0, 5);
+					String num = ReqRefNo.substring(5, ReqRefNo.length());
+					if (ReqRefNo.matches("^(?![0-9]*$)[a-zA-Z0-9]+$") && sbi.equalsIgnoreCase("SBI")
+							&& StringUtils.isAlphanumeric(s)) {
+						if (StringUtils.isAlphanumeric(num)) {
+							logger.info("REQUEST_REFERENCE_NUMBER IS VALID");
+							logger.info("REQUEST_REFERENCE_NUMBER>>>>" + ReqRefNo);
+						} else {
+							logger.error("Reveiced Req Ref number is invalid 2,  received ref number is: {}", ReqRefNo);
+							resp.setERROR_CODE("CB460");
+							resp.setERROR_DESCRIPTION(error.getProperty("CB460"));
+							resp.setSOURCE_ID(SourceId);
+							resp.setRESPONSE_STATUS("1");
+							resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+							finalResponse = gson.toJson(resp);
+							customFilter(finalResponse);
+							reqbeanstr = gson.toJson(reqbean).toString();
+							migDetails.LogData("1", MigReqStr,
+									Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress,
+									tellerNo, "CB460", error.getProperty("CB460"),
+									reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(), msbalenq.getFail(),
+									entryDate, CLIENT_IP);
+							if (filterFlag = true) {
+								return new ResponseEntity(finalResponse, HttpStatus.OK);
+							}
+						}
+					} else {
+						logger.error("Reveiced Req Ref number is invalid 3,  received ref number is: {}", ReqRefNo);
+						resp.setERROR_CODE("CB460");
+						resp.setERROR_DESCRIPTION(error.getProperty("CB460"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						customFilter(finalResponse);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"CB460", error.getProperty("CB460"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+				}
+
+				if (SourceId == null || !StringUtils.isAlphanumeric(SourceId) || SourceId.length() > 5) {
+					logger.error("Source ID is invalid,  received ID: {}", SourceId);
+					resp.setERROR_CODE("CB474");
+					resp.setERROR_DESCRIPTION(error.getProperty("CB474"));
+					resp.setSOURCE_ID(SourceId);
+					resp.setRESPONSE_STATUS("1");
+					resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+					finalResponse = gson.toJson(resp);
+					reqbeanstr = gson.toJson(reqbean).toString();
+					migDetails.LogData("1", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+							remoteAddress, tellerNo, "CB474", error.getProperty("CB474"),
+							reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(), msbalenq.getFail(),
+							entryDate, CLIENT_IP);
+					if (filterFlag = true) {
+						return new ResponseEntity(finalResponse, HttpStatus.OK);
+					}
+
+				}
+
+				if (acctStatus == null) {
+				} else if (CustomerNo != null) {
+					if ((!(acctStatus.equals("O") || acctStatus.equals("C")))) {
+						logger.error("Reveiced acctStatus  is invalid,  received acctStatus is: {}", acctStatus);
+						resp.setERROR_CODE("CB493");
+						resp.setERROR_DESCRIPTION(error.getProperty("CB493"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"CB474", error.getProperty("CB474"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+				}
+				
+				syscScheduler.refreshSysc();
+				
+				List<Telm> telm = new ArrayList<Telm>();
+				if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+					telm = telmDetailDayRepo.findByTelmDetails("003", tellerNo);
+				} else if (syscScheduler.isNightRef()) {
+					telm = telmDetailRefRepo.findByTelmDetails("003", tellerNo);
+				}
+				
+				if (tellerNo == null) {
+				}
+
+				else if (StringUtils.isNumeric(tellerNo) || tellerNo != null) {
+					if (tellerNo.equals("")) {
+						logger.error("Reveiced teller number is invalid,teller num is: {}", tellerNo);
+						resp.setERROR_CODE("0146");
+						resp.setERROR_DESCRIPTION(error.getProperty("0146"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						customFilter(finalResponse);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"0146", error.getProperty("0146"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+					
+
+					if (telm.isEmpty()) {
+						logger.error("Reveiced teller number is invalid,teller 1 num is: {}", tellerNo);
+						resp.setERROR_CODE("0146");
+						resp.setERROR_DESCRIPTION(error.getProperty("0146"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						customFilter(finalResponse);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"0146", error.getProperty("0146"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+				}
+
+				if (!telm.isEmpty()) {
+					sign_on_flag = telm.get(0).getSIGNON_FLAG();
+					if (sign_on_flag.equals("Y")) {
+
+					} else {
+						logger.error("User not Signed On: {}", telm);
+						resp.setERROR_CODE("0148");
+						resp.setERROR_DESCRIPTION(error.getProperty("0148"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						customFilter(finalResponse);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"0148", error.getProperty("0148"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+				}
+
+				if (BranchNo != null) {
+					if (BranchNo.equals("") || !StringUtils.isNumeric(BranchNo) || BranchNo.length() > 5) {
+						logger.error("Reveiced branch number is invalid,branch  num is: {}", BranchNo);
+						resp.setERROR_CODE("0206");
+						resp.setERROR_DESCRIPTION(error.getProperty("0206"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						customFilter(finalResponse);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"0206", error.getProperty("0206"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+
+					}
+				}
+
+				
+				if (AccountType == null) {
+					logger.error("Reveiced accountType  is invalid,  received accountType is: {}", AccountType);
+					resp.setERROR_CODE("CB479");
+					resp.setERROR_DESCRIPTION(error.getProperty("CB479"));
+					resp.setSOURCE_ID(SourceId);
+					resp.setRESPONSE_STATUS("1");
+					resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+					finalResponse = gson.toJson(resp);
+					reqbeanstr = gson.toJson(reqbean).toString();
+					migDetails.LogData("1", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+							remoteAddress, tellerNo, "CB479", error.getProperty("CB479"),
+							reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(), msbalenq.getFail(),
+							entryDate, CLIENT_IP);
+					if (filterFlag = true) {
+						return new ResponseEntity(finalResponse, HttpStatus.OK);
+					}
+				} else if (!(AccountType.equals("DL") || AccountType.equals("CO") || AccountType.equals("TD")
+						|| AccountType.equals("DO") || AccountType.equals("AL"))) {
+
+					logger.error("Reveiced accountType  is invalid,  received accountType is: {}", AccountType);
+					resp.setERROR_CODE("CB479");
+					resp.setERROR_DESCRIPTION(error.getProperty("CB479"));
+					resp.setSOURCE_ID(SourceId);
+					resp.setRESPONSE_STATUS("1");
+					resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+					finalResponse = gson.toJson(resp);
+					reqbeanstr = gson.toJson(reqbean).toString();
+					migDetails.LogData("1", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+							remoteAddress, tellerNo, "CB479", error.getProperty("CB479"),
+							reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(), msbalenq.getFail(),
+							entryDate, CLIENT_IP);
+					if (filterFlag = true) {
+						return new ResponseEntity(finalResponse, HttpStatus.OK);
+					}
+
+				}
+				if ((requestData != null) && (CustomerNo != null)) {
+					logger.error("PL ENQUIRE EITHER WITH CUSTOMER/ACCOUNT_NUMBER: {}");
+					resp.setERROR_CODE("CB534");
+					resp.setERROR_DESCRIPTION(error.getProperty("CB534"));
+					resp.setSOURCE_ID(SourceId);
+					resp.setRESPONSE_STATUS("1");
+					resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+					finalResponse = gson.toJson(resp);
+					customFilter(finalResponse);
+					reqbeanstr = gson.toJson(reqbean).toString();
+					migDetails.LogData("1", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+							remoteAddress, tellerNo, "CB534", error.getProperty("CB534"),
+							reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(), msbalenq.getFail(),
+							entryDate, CLIENT_IP);
+					if (filterFlag = true) {
+						return new ResponseEntity(finalResponse, HttpStatus.OK);
+					}
+				}
+				if (CustomerNo != null) {
+
+					if (CustomerNo == null || (CustomerNo.length() > 17) || (CustomerNo.length()) < 11) {
+						logger.error("Reveiced requestData is invalid,  received requestData is: {1}", requestData);
+						resp.setERROR_CODE("CB423");
+						resp.setERROR_DESCRIPTION(error.getProperty("CB423"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						Gson gson1 = new GsonBuilder().disableHtmlEscaping().create();
+						finalResponse = gson1.toJson(resp);
+						reqbeanstr = gson1.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"CB423", error.getProperty("CB423"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+
+					if (StringUtils.isNumeric(CustomerNo)) {
+						try {
+							CustomerNo = calculateCheckDigit.AccountNumberWithoutCheckDigit(CustomerNo);
+							CustomerNo = stringUtils.leftPad(CustomerNo, 16, "0");
+						} catch (RuleAccessTechnicalException e) {
+							logger.error("Reveiced check digit is invalid,  received check digit is: {1}", requestData);
+							resp.setERROR_CODE("0169");
+							resp.setERROR_DESCRIPTION(error.getProperty("0169"));
+							resp.setSOURCE_ID(SourceId);
+							resp.setRESPONSE_STATUS("1");
+							resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+							finalResponse = gson.toJson(resp);
+							reqbeanstr = gson.toJson(reqbean).toString();
+							migDetails.LogData("1", MigReqStr,
+									Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress,
+									tellerNo, "0169", error.getProperty("0169"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+									reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+							if (filterFlag = true) {
+								return new ResponseEntity(finalResponse, HttpStatus.OK);
+							}
+						}
+					} else {
+						logger.error("Reveiced requestData is invalid,  received requestData is: {2}", requestData);
+						resp.setERROR_CODE("CB423");
+						resp.setERROR_DESCRIPTION(error.getProperty("CB423"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"CB423", error.getProperty("CB423"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+					String cust = CustomerNo.substring(6, 16);
+					List<Cusm> cusm1 = new ArrayList<Cusm>();
+					if(!syscScheduler.isNightEnabled()) {
+						
+						cusm1 = cusmDetailDayRepo.findByCusmDetail(CustomerNo);
+					}else if(syscScheduler.isNightDay()) {
+						cusm1 = cusmDetailNightRepo.findByCusmDetail(CustomerNo);
+						if (cusm1.isEmpty()) {
+							cusm1 = cusmDetailDayRepo.findByCusmDetail(CustomerNo);
+						}
+					}else if(syscScheduler.isNightRef()) {
+						cusm1 = cusmDetailNightRepo.findByCusmDetail(CustomerNo);
+						if (cusm1.isEmpty()) {
+							cusm1 = cusmDetailRefRepo.findByCusmDetail(CustomerNo);
+						}
+					}
+					
+					
+					
+					
+					
+					
+					if (cusm1.isEmpty()) {
+						logger.error("Reveiced cusm is empty ,received cusm is: {1}", cusm1);
+						resp.setERROR_CODE("0188");
+						resp.setERROR_DESCRIPTION(error.getProperty("0188"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						Gson gson1 = new GsonBuilder().disableHtmlEscaping().create();
+						finalResponse = gson1.toJson(resp);
+						reqbeanstr = gson1.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"0188", error.getProperty("0188"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					} else {
+
+						if (!(cusm1.get(0).getAcctsys().contains(" ") || cusm1.get(0).getAcctsys() == null)) {
+							logger.error("Received Acctsys is not contained space,  received Acctsys is: {1}",
+									cusm1.get(0).getAcctsys());
+							resp.setERROR_CODE("0188");
+							resp.setERROR_DESCRIPTION(error.getProperty("0188"));
+							resp.setSOURCE_ID(SourceId);
+							resp.setRESPONSE_STATUS("1");
+							resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+							finalResponse = gson.toJson(resp);
+							reqbeanstr = gson.toJson(reqbean).toString();
+							migDetails.LogData("1", MigReqStr,
+									Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress,
+									tellerNo, "0188", error.getProperty("0188"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+									reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+							if (filterFlag = true) {
+								return new ResponseEntity(finalResponse, HttpStatus.OK);
+							}
+						} else if (!cusm1.get(0).getPrim_acct().equals(cust)) {
+							logger.error("Received cust is not same as prim_acct,  received cust is: {1}",
+									cusm1.get(0).getAcctsys());
+							resp.setERROR_CODE("0188");
+							resp.setERROR_DESCRIPTION(error.getProperty("0188"));
+							resp.setSOURCE_ID(SourceId);
+							resp.setRESPONSE_STATUS("1");
+							resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+							finalResponse = gson.toJson(resp);
+							reqbeanstr = gson.toJson(reqbean).toString();
+							migDetails.LogData("1", MigReqStr,
+									Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress,
+									tellerNo, "0188", error.getProperty("0188"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+									reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+							if (filterFlag = true) {
+								return new ResponseEntity(finalResponse, HttpStatus.OK);
+							}
+						}
+
+						List<Cusvcc> cusvcc = new ArrayList<Cusvcc>();
+						String key_1_cusvcc = "003" + CustomerNo;
+						if(!syscScheduler.isNightEnabled()) {
+							cusvcc = cusvccDetailDayRepo.findByCusvccDetail(key_1_cusvcc);
+						}else if(syscScheduler.isNightDay()) {
+							cusvcc = cusvccDetailNightRepo.findByCusvccDetail(key_1_cusvcc);
+							if (cusvcc.isEmpty()) {
+								cusvcc = cusvccDetailDayRepo.findByCusvccDetail(key_1_cusvcc);
+							}
+						}else if(syscScheduler.isNightRef()) {
+							cusvcc = cusvccDetailNightRepo.findByCusvccDetail(key_1_cusvcc);
+							if (cusvcc.isEmpty()) {
+								cusvcc = cusvccDetailRefRepo.findByCusvccDetail(key_1_cusvcc);
+							}
+						}
+						if (!cusvcc.isEmpty()) {
+							for (int k = 0; k < cusvcc.size(); k++) {
+								ArrayList<TempObj> cusvccArr = new ArrayList<TempObj>();
+								TempObj acct1 = new TempObj(cusvcc.get(k).getStatus01(), cusvcc.get(k).getAcctno01(),
+										cusvcc.get(k).getSyst01(), cusvcc.get(k).getRelat01(),
+										cusvcc.get(k).getLinkType01(), cusvcc.get(k).getLinkSyst01(),
+										cusvcc.get(k).getLinkCuaAcno01());
+								TempObj acct2 = new TempObj(cusvcc.get(k).getStatus02(), cusvcc.get(k).getAcctno02(),
+										cusvcc.get(k).getSyst02(), cusvcc.get(k).getRelat02(),
+										cusvcc.get(k).getLinkType02(), cusvcc.get(k).getLinkSyst02(),
+										cusvcc.get(k).getLinkCuaAcno02());
+								TempObj acct3 = new TempObj(cusvcc.get(k).getStatus03(), cusvcc.get(k).getAcctno03(),
+										cusvcc.get(k).getSyst03(), cusvcc.get(k).getRelat03(),
+										cusvcc.get(k).getLinkType03(), cusvcc.get(k).getLinkSyst03(),
+										cusvcc.get(k).getLinkCuaAcno03());
+								TempObj acct4 = new TempObj(cusvcc.get(k).getStatus04(), cusvcc.get(k).getAcctno04(),
+										cusvcc.get(k).getSyst04(), cusvcc.get(k).getRelat04(),
+										cusvcc.get(k).getLinkType04(), cusvcc.get(k).getLinkSyst04(),
+										cusvcc.get(k).getLinkCuaAcno04());
+								TempObj acct5 = new TempObj(cusvcc.get(k).getStatus05(), cusvcc.get(k).getAcctno05(),
+										cusvcc.get(k).getSyst05(), cusvcc.get(k).getRelat05(),
+										cusvcc.get(k).getLinkType05(), cusvcc.get(k).getLinkSyst05(),
+										cusvcc.get(k).getLinkCuaAcno05());
+								TempObj acct6 = new TempObj(cusvcc.get(k).getStatus06(), cusvcc.get(k).getAcctno06(),
+										cusvcc.get(k).getSyst06(), cusvcc.get(k).getRelat06(),
+										cusvcc.get(k).getLinkType06(), cusvcc.get(k).getLinkSyst06(),
+										cusvcc.get(k).getLinkCuaAcno06());
+								TempObj acct7 = new TempObj(cusvcc.get(k).getStatus07(), cusvcc.get(k).getAcctno07(),
+										cusvcc.get(k).getSyst07(), cusvcc.get(k).getRelat07(),
+										cusvcc.get(k).getLinkType07(), cusvcc.get(k).getLinkSyst07(),
+										cusvcc.get(k).getLinkCuaAcno07());
+								TempObj acct8 = new TempObj(cusvcc.get(k).getStatus08(), cusvcc.get(k).getAcctno08(),
+										cusvcc.get(k).getSyst08(), cusvcc.get(k).getRelat08(),
+										cusvcc.get(k).getLinkType08(), cusvcc.get(k).getLinkSyst08(),
+										cusvcc.get(k).getLinkCuaAcno08());
+								cusvccArr.add(acct1);
+								cusvccArr.add(acct2);
+								cusvccArr.add(acct3);
+								cusvccArr.add(acct4);
+								cusvccArr.add(acct5);
+								cusvccArr.add(acct6);
+								cusvccArr.add(acct7);
+								cusvccArr.add(acct8);
+								for (Iterator<TempObj> iterator = cusvccArr.iterator(); iterator.hasNext();) {
+									TempObj tempObj = (TempObj) iterator.next();
+									if (!tempObj.getGetSyst().equals("T")) {
+										if (!(tempObj.getStatus().equals("91") || tempObj.getStatus().equals("92"))) {
+
+											if (AccountType.equals("DL")) {
+
+												/******** DLTLOD List **********/
+												if (tempObj.getGetSyst().equals("B")) {
+													DltlAcctBean bormAccountFetch = new DltlAcctBean();
+													if (syscScheduler.isNightEnabled()) {
+														bormAccountFetch = lonRepo.LONaccountFetchNight(
+																tempObj.getGetAcctno(), tempObj.getRelate(),
+																tempObj.getLinkType(), acctStatus);
+
+													} else {
+														bormAccountFetch = lonRepo.LONaccountFetchDay(
+																tempObj.getGetAcctno(), tempObj.getRelate(),
+																tempObj.getLinkType(), acctStatus);
+
+													}
+													if (!(bormAccountFetch == null)) {
+														LonAcctBeanList.add(bormAccountFetch);
+													}
+
+												} else {
+													if (tempObj.getGetSyst().equals("C")
+															&& tempObj.getAcctno.equals("0")
+															&& (tempObj.getRelate().equals("04")
+																	|| tempObj.getRelate().equals("06"))) {
+														if (tempObj.getLinkSyst().equals("B")) {
+															DltlAcctBean bormAccountFetch = new DltlAcctBean();
+															if (syscScheduler.isNightEnabled()) {
+																bormAccountFetch = lonRepo.LONaccountFetchNight(
+																		tempObj.getLinkCuaAcno(), tempObj.getRelate(),
+																		tempObj.getLinkType(), acctStatus);
+															} else {
+																bormAccountFetch = lonRepo.LONaccountFetchDay(
+																		tempObj.getLinkCuaAcno(), tempObj.getRelate(),
+																		tempObj.getLinkType(), acctStatus);
+															}
+															if (!(bormAccountFetch == null)) {
+																LonAcctBeanList.add(bormAccountFetch);
+															}
+
+														}
+													}
+												}
+											}
+											if (AccountType.equals("CO")) {
+												/******** CASACCOD List **********/
+												if (tempObj.getGetSyst().equals("I")) {
+
+													String acctNO = StringUtils.leftPad(tempObj.getGetAcctno(), 16,"0");
+													List<Invm> invm = new ArrayList<Invm>();
+													if(!syscScheduler.isNightEnabled()) {
+														invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+													}else if(syscScheduler.isNightDay()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}
+													}else if(syscScheduler.isNightRef()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+														}
+													}
+													
+													
+
+													if (!invm.isEmpty()) {
+														List<Depp> depp = new ArrayList<Depp>();
+														if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+															depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+														} else if (syscScheduler.isNightRef()) {
+															depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+														}
+														
+														if (!depp.isEmpty()) {
+															if (depp.get(0).getOd_indicator().equals("Y")) {
+																CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+
+																/******** CASAOD List **********/
+																if (syscScheduler.isNightEnabled()) {
+																	invmAccountFetch = depRepo.DEPaccountFetchNight(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																} else {
+																	invmAccountFetch = depRepo.DEPaccountFetchDay(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+
+																}
+																if (!(invmAccountFetch == null)) {
+																	DepAcctODBeanList.add(invmAccountFetch);
+																}
+
+															} else if (depp.get(0).getOd_indicator().equals("N")
+																	&& !depp.get(0).getPpfFlag().equals("Y")
+																	&& (depp.get(0).getAcctdesc().equals("Q")
+																			|| depp.get(0).getAcctdesc().equals("S")
+																			|| depp.get(0).getAcctdesc().equals("V"))) {
+																/******** CASAOD List **********/
+																CASAodAcctDetails invmAccountFetch = new CASAodAcctDetails();
+																if (syscScheduler.isNightEnabled()) {
+																	invmAccountFetch = depRepo.invmAccountFetchNight(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																} else {
+																	invmAccountFetch = depRepo.invmAccountFetchDay(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+
+																}
+																if (!(invmAccountFetch == null)) {
+																	DepAcctBeanList.add(invmAccountFetch);
+																}
+
+															}
+														}
+													}
+
+													logger.info(">>>I >> ACCT " + tempObj.getGetAcctno());
+												} else if (tempObj.getGetSyst().equals("C")
+														&& tempObj.getAcctno.equals("0")
+														&& (tempObj.getRelate().equals("04")
+																|| tempObj.getRelate().equals("06"))) {
+													if (tempObj.getLinkSyst().equals("I")) {
+
+														String acctNO = StringUtils.leftPad(tempObj.getLinkCuaAcno(),16, "0");
+														List<Invm> invm = new ArrayList<Invm>();
+														if(!syscScheduler.isNightEnabled()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}else if(syscScheduler.isNightDay()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+															}
+														}else if(syscScheduler.isNightRef()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+															}
+														}
+														
+														if (!invm.isEmpty()) {
+															List<Depp> depp = new ArrayList<Depp>();
+															if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+																depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+															} else if (syscScheduler.isNightRef()) {
+																depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+															}
+															
+														
+															if (!depp.isEmpty()) {
+																if (depp.get(0).getOd_indicator().equals("Y")) {
+
+																	/******** CASAOD List **********/
+																	CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+																	if (syscScheduler.isNightEnabled()) {
+																		invmAccountFetch = depRepo.DEPaccountFetchNight(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+																	} else {
+																		invmAccountFetch = depRepo.DEPaccountFetchDay(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+
+																	}
+																	if (!(invmAccountFetch == null)) {
+																		DepAcctODBeanList.add(invmAccountFetch);
+																	}
+
+																} else if (depp.get(0).getOd_indicator().equals("N")
+																		&& !depp.get(0).getPpfFlag().equals("Y")
+																		&& (depp.get(0).getAcctdesc().equals("Q")
+																				|| depp.get(0).getAcctdesc().equals("S")
+																				|| depp.get(0).getAcctdesc()
+																						.equals("V"))) {
+																	/******** CASAOD List **********/
+																	CASAodAcctDetails invmAccountFetch = new CASAodAcctDetails();
+																	if (syscScheduler.isNightEnabled()) {
+																		invmAccountFetch = depRepo
+																				.invmAccountFetchNight(
+																						tempObj.getLinkCuaAcno(),
+																						tempObj.getRelate(),
+																						tempObj.getLinkType(),
+																						acctStatus);
+																	} else {
+																		invmAccountFetch = depRepo.invmAccountFetchDay(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+
+																	}
+																	if (!(invmAccountFetch == null)) {
+																		DepAcctBeanList.add(invmAccountFetch);
+																	}
+
+																}
+															}
+														}
+
+													}
+												}
+											}
+											if (AccountType.equals("TD")) {
+												/******** TDR-STDR List **********/
+												if (tempObj.getGetSyst().equals("I")) {
+													String acctNO = StringUtils.leftPad(tempObj.getGetAcctno(), 16,
+															"0");
+													List<Invm> invm = new ArrayList<Invm>();
+													
+													if(!syscScheduler.isNightEnabled()) {
+														invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+													}else if(syscScheduler.isNightDay()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}
+													}else if(syscScheduler.isNightRef()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+														}
+													}
+													
+													if (!invm.isEmpty()) {
+														List<Depp> depp = new ArrayList<Depp>();
+														if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+															depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+														} else if (syscScheduler.isNightRef()) {
+															depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+														}
+														
+													
+
+														if (!depp.isEmpty()) {
+															if (depp.get(0).getAcctdesc().equals("T")
+																	|| depp.get(0).getPpfFlag().equals("Y")) {
+																TDR_STDRAcctDetails invmAccountFetch = new TDR_STDRAcctDetails();
+																if (syscScheduler.isNightEnabled()) {
+																	invmAccountFetch = depRepo.invmAccountFetchTdNight(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																} else {
+																	invmAccountFetch = depRepo.invmAccountFetchTdDay(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+
+																}
+																if (!(invmAccountFetch == null)) {
+																	TDRAcctBeanList.add(invmAccountFetch);
+																}
+																logger.info(">>>I TD>> ACCT " + tempObj.getGetAcctno());
+																logger.info("invmAccountFetch>>> " + invmAccountFetch);
+															}
+														}
+													}
+												} else if (tempObj.getGetSyst().equals("C")
+														&& tempObj.getAcctno.equals("0")
+														&& (tempObj.getRelate().equals("04")
+																|| tempObj.getRelate().equals("06"))) {
+													if (tempObj.getLinkSyst().equals("I")) {
+														String acctNO = StringUtils.leftPad(tempObj.getLinkCuaAcno(),16, "0");
+														List<Invm> invm = new ArrayList<Invm>();
+														if(!syscScheduler.isNightEnabled()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}else if(syscScheduler.isNightDay()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+															}
+														}else if(syscScheduler.isNightRef()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+															}
+														}
+													
+														if (!invm.isEmpty()) {
+															List<Depp> depp = new ArrayList<Depp>();
+															
+															if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+																depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+															} else if (syscScheduler.isNightRef()) {
+																depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+															}
+														
+
+															if (!depp.isEmpty()) {
+																if (depp.get(0).getAcctdesc().equals("T")
+																		|| depp.get(0).getPpfFlag().equals("Y")) {
+																	TDR_STDRAcctDetails invmAccountFetch = new TDR_STDRAcctDetails();
+																	if (syscScheduler.isNightEnabled()) {
+																		invmAccountFetch = depRepo
+																				.invmAccountFetchTdNight(
+																						tempObj.getLinkCuaAcno(),
+																						tempObj.getRelate(),
+																						tempObj.getLinkType(),
+																						acctStatus);
+																	} else {
+																		invmAccountFetch = depRepo
+																				.invmAccountFetchTdDay(
+																						tempObj.getLinkCuaAcno(),
+																						tempObj.getRelate(),
+																						tempObj.getLinkType(),
+																						acctStatus);
+
+																	}
+																	if (!(invmAccountFetch == null)) {
+																		TDRAcctBeanList.add(invmAccountFetch);
+																	}
+																	logger.info(">>>I TD>> ACCT "
+																			+ tempObj.getLinkCuaAcno());
+																	logger.info(
+																			"invmAccountFetch>>> " + invmAccountFetch);
+																}
+															}
+														}
+													}
+												}
+											}
+											if (AccountType.equals("DO")) {
+												/******** DLTLOD List **********/
+												if (tempObj.getGetSyst().equals("B")) {
+													DltlAcctBean bormAccountFetch = new DltlAcctBean();
+													if (syscScheduler.isNightEnabled()) {
+														bormAccountFetch = lonRepo.LONaccountFetchNight(
+																tempObj.getGetAcctno(), tempObj.getRelate(),
+																tempObj.getLinkType(), acctStatus);
+													} else {
+														bormAccountFetch = lonRepo.LONaccountFetchDay(
+																tempObj.getGetAcctno(), tempObj.getRelate(),
+																tempObj.getLinkType(), acctStatus);
+
+													}
+													if (!(bormAccountFetch == null)) {
+														LonAcctBeanList.add(bormAccountFetch);
+													}
+
+												} else if (tempObj.getGetSyst().equals("I")) {
+													String acctNO = StringUtils.leftPad(tempObj.getGetAcctno(), 16,"0");
+													List<Invm> invm = new ArrayList<Invm>();
+													if(!syscScheduler.isNightEnabled()) {
+														invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+													}else if(syscScheduler.isNightDay()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}
+													}else if(syscScheduler.isNightRef()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+														}
+													}
+													if (!invm.isEmpty()) {
+														List<Depp> depp = new ArrayList<Depp>();
+														if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+															depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+														} else if (syscScheduler.isNightRef()) {
+															depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+														}
+
+														if (!depp.isEmpty()) {
+															if (depp.get(0).getOd_indicator().equals("Y")) {
+
+																CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+																if (syscScheduler.isNightEnabled()) {
+																	invmAccountFetch = depRepo.DEPaccountFetchNight(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																} else {
+																	invmAccountFetch = depRepo.DEPaccountFetchDay(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+
+																}
+																if (!(invmAccountFetch == null)) {
+																	DepAcctODBeanList.add(invmAccountFetch);
+																}
+
+															}
+														}
+													}
+												} else if (tempObj.getGetSyst().equals("C")
+														&& tempObj.getAcctno.equals("0")
+														&& (tempObj.getRelate().equals("04")
+																|| tempObj.getRelate().equals("06"))) {
+													if (tempObj.getLinkSyst().equals("B")) {
+														DltlAcctBean bormAccountFetch = new DltlAcctBean();
+														if (syscScheduler.isNightEnabled()) {
+															bormAccountFetch = lonRepo.LONaccountFetchNight(
+																	tempObj.getLinkCuaAcno(), tempObj.getRelate(),
+																	tempObj.getLinkType(), acctStatus);
+														} else {
+															bormAccountFetch = lonRepo.LONaccountFetchDay(
+																	tempObj.getLinkCuaAcno(), tempObj.getRelate(),
+																	tempObj.getLinkType(), acctStatus);
+
+														}
+														if (!(bormAccountFetch == null)) {
+															LonAcctBeanList.add(bormAccountFetch);
+														}
+
+													} else if (tempObj.getLinkSyst().equals("I")) {
+														String acctNO = StringUtils.leftPad(tempObj.getLinkCuaAcno(),
+																16, "0");
+														List<Invm> invm = new ArrayList<Invm>();
+														if(!syscScheduler.isNightEnabled()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}else if(syscScheduler.isNightDay()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+															}
+														}else if(syscScheduler.isNightRef()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+															}
+														}
+														if (!invm.isEmpty()) {
+															List<Depp> depp = new ArrayList<Depp>();
+															if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+																depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+															} else if (syscScheduler.isNightRef()) {
+																depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+															}
+
+															if (!depp.isEmpty()) {
+																if (depp.get(0).getOd_indicator().equals("Y")) {
+
+																	CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+																	if (syscScheduler.isNightEnabled()) {
+																		invmAccountFetch = depRepo.DEPaccountFetchNight(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+																	} else {
+																		invmAccountFetch = depRepo.DEPaccountFetchDay(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+
+																	}
+																	if (!(invmAccountFetch == null)) {
+																		DepAcctODBeanList.add(invmAccountFetch);
+																	}
+
+																}
+															}
+														}
+													}
+												}
+											}
+											if (AccountType.equals("AL")) {
+												if (tempObj.getGetSyst().equals("B")) {
+													/******** DLTLOD List **********/
+													DltlAcctBean bormAccountFetch = new DltlAcctBean();
+
+													if (syscScheduler.isNightEnabled()) {
+														bormAccountFetch = lonRepo.LONaccountFetchNight(
+																tempObj.getGetAcctno(), tempObj.getRelate(),
+																tempObj.getLinkType(), acctStatus);
+													} else {
+														bormAccountFetch = lonRepo.LONaccountFetchDay(
+																tempObj.getGetAcctno(), tempObj.getRelate(),
+																tempObj.getLinkType(), acctStatus);
+
+													}
+													if (!(bormAccountFetch == null)) {
+														LonAcctBeanList.add(bormAccountFetch);
+													}
+												} else if (tempObj.getGetSyst().equals("I")) {
+													String acctNO = StringUtils.leftPad(tempObj.getGetAcctno(), 16,
+															"0");
+													List<Invm> invm = new ArrayList<Invm>();
+													if(!syscScheduler.isNightEnabled()) {
+														invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+													}else if(syscScheduler.isNightDay()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}
+													}else if(syscScheduler.isNightRef()) {
+														invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+														if (invm.isEmpty()) {
+															invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+														}
+													}
+													if (!invm.isEmpty()) {
+														List<Depp> depp = new ArrayList<Depp>();
+														if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+															depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+														} else if (syscScheduler.isNightRef()) {
+															depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+														}
+														if (!depp.isEmpty()) {
+															if (depp.get(0).getOd_indicator().equals("Y")) {
+																/******** CASAOD List **********/
+																CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+																if (syscScheduler.isNightEnabled()) {
+																	invmAccountFetch = depRepo.DEPaccountFetchNight(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																} else {
+																	invmAccountFetch = depRepo.DEPaccountFetchDay(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+
+																}
+																if (!(invmAccountFetch == null)) {
+																	DepAcctODBeanList.add(invmAccountFetch);
+																}
+															} else if (depp.get(0).getOd_indicator().equals("N")
+																	&& !depp.get(0).getPpfFlag().equals("Y")
+																	&& (depp.get(0).getAcctdesc().equals("Q")
+																			|| depp.get(0).getAcctdesc().equals("S")
+																			|| depp.get(0).getAcctdesc().equals("V"))) {
+																/******** CASAOD List **********/
+																CASAodAcctDetails invmAccountFetch = new CASAodAcctDetails();
+																if (syscScheduler.isNightEnabled()) {
+																	invmAccountFetch = depRepo.invmAccountFetchNight(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																} else {
+																	invmAccountFetch = depRepo.invmAccountFetchDay(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																}
+																if (!(invmAccountFetch == null)) {
+																	DepAcctBeanList.add(invmAccountFetch);
+																}
+															}
+															if (depp.get(0).getAcctdesc().equals("T")
+																	|| depp.get(0).getPpfFlag().equals("Y")) {
+																/******** TDR-STDR List **********/
+																TDR_STDRAcctDetails invmAccountFetch = new TDR_STDRAcctDetails();
+																if (syscScheduler.isNightEnabled()) {
+																	invmAccountFetch = depRepo.invmAccountFetchTdNight(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+																} else {
+																	invmAccountFetch = depRepo.invmAccountFetchTdDay(
+																			tempObj.getGetAcctno(), tempObj.getRelate(),
+																			tempObj.getLinkType(), acctStatus);
+
+																}
+																if (!(invmAccountFetch == null)) {
+																	TDRAcctBeanList.add(invmAccountFetch);
+																}
+															}
+														}
+													}
+												} else if (tempObj.getGetSyst().equals("C")
+														&& tempObj.getAcctno.equals("0")
+														&& (tempObj.getRelate().equals("04")
+																|| tempObj.getRelate().equals("06"))) {
+													if (tempObj.getLinkSyst().equals("B")) {
+														/******** DLTLOD List **********/
+														DltlAcctBean bormAccountFetch = new DltlAcctBean();
+
+														if (syscScheduler.isNightEnabled()) {
+															bormAccountFetch = lonRepo.LONaccountFetchNight(
+																	tempObj.getLinkCuaAcno(), tempObj.getRelate(),
+																	tempObj.getLinkType(), acctStatus);
+														} else {
+															bormAccountFetch = lonRepo.LONaccountFetchDay(
+																	tempObj.getLinkCuaAcno(), tempObj.getRelate(),
+																	tempObj.getLinkType(), acctStatus);
+
+														}
+
+														if (!(bormAccountFetch == null)) {
+															LonAcctBeanList.add(bormAccountFetch);
+														}
+													} else if (tempObj.getLinkSyst().equals("I")) {
+														String acctNO = StringUtils.leftPad(tempObj.getLinkCuaAcno(),
+																16, "0");
+														List<Invm> invm = new ArrayList<Invm>();
+														if(!syscScheduler.isNightEnabled()) {
+															invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+														}else if(syscScheduler.isNightDay()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmDayRepo.findByInvm1Details("003" + acctNO);
+															}
+														}else if(syscScheduler.isNightRef()) {
+															invm = invmNightRepo.findByInvm1Details("003" + acctNO);
+															if (invm.isEmpty()) {
+																invm = invmRefRepo.findByInvm1Details("003" + acctNO);
+															}
+														}
+														if (!invm.isEmpty()) {
+															List<Depp> depp = new ArrayList<Depp>();
+															if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+																depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+															} else if (syscScheduler.isNightRef()) {
+																depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+															}
+															if (!depp.isEmpty()) {
+																if (depp.get(0).getOd_indicator().equals("Y")) {
+
+																	/******** CASAOD List **********/
+																	CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+																	if (syscScheduler.isNightEnabled()) {
+																		invmAccountFetch = depRepo.DEPaccountFetchNight(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+																	} else {
+																		invmAccountFetch = depRepo.DEPaccountFetchDay(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+
+																	}
+																	if (!(invmAccountFetch == null)) {
+																		DepAcctODBeanList.add(invmAccountFetch);
+																	}
+																} else if (depp.get(0).getOd_indicator().equals("N")
+																		&& !depp.get(0).getPpfFlag().equals("Y")
+																		&& (depp.get(0).getAcctdesc().equals("Q")
+																				|| depp.get(0).getAcctdesc().equals("S")
+																				|| depp.get(0).getAcctdesc()
+																						.equals("V"))) {
+																	/******** CASAOD List **********/
+																	CASAodAcctDetails invmAccountFetch = new CASAodAcctDetails();
+																	if (syscScheduler.isNightEnabled()) {
+																		invmAccountFetch = depRepo
+																				.invmAccountFetchNight(
+																						tempObj.getLinkCuaAcno(),
+																						tempObj.getRelate(),
+																						tempObj.getLinkType(),
+																						acctStatus);
+																	} else {
+																		invmAccountFetch = depRepo.invmAccountFetchDay(
+																				tempObj.getLinkCuaAcno(),
+																				tempObj.getRelate(),
+																				tempObj.getLinkType(), acctStatus);
+
+																	}
+																	if (!(invmAccountFetch == null)) {
+																		DepAcctBeanList.add(invmAccountFetch);
+																	}
+																}
+																if (depp.get(0).getAcctdesc().equals("T")
+																		|| depp.get(0).getPpfFlag().equals("Y")) {
+																	/******** TDR-STDR List **********/
+																	TDR_STDRAcctDetails invmAccountFetch = new TDR_STDRAcctDetails();
+																	if (syscScheduler.isNightEnabled()) {
+																		invmAccountFetch = depRepo
+																				.invmAccountFetchTdNight(
+																						tempObj.getLinkCuaAcno(),
+																						tempObj.getRelate(),
+																						tempObj.getLinkType(),
+																						acctStatus);
+																	} else {
+																		invmAccountFetch = depRepo
+																				.invmAccountFetchTdDay(
+																						tempObj.getLinkCuaAcno(),
+																						tempObj.getRelate(),
+																						tempObj.getLinkType(),
+																						acctStatus);
+
+																	}
+																	if (!(invmAccountFetch == null)) {
+																		TDRAcctBeanList.add(invmAccountFetch);
+																	}
+																}
+															}
+														}
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+
+						LonAcctBeanList.stream().filter(A -> A.getLINK().equals("GTR")).forEach(A -> {
+							A.getACCOUNT_NUMBER();
+							filterlistDLTLGTR.add(A);
+						});
+						LonAcctBeanList.removeAll(filterlistDLTLGTR);
+
+						/* filterlist1DLTL = */ LonAcctBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getLINK().equals("O&J")))
+								.collect(Collectors.toList());
+
+						filterlist2DLTL = LonAcctBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+
+						for (DltlAcctBean i : LonAcctBeanList) {
+							for (int j = 0; j < filterlist2DLTL.size(); j++) {
+								if (i.getACCOUNT_NUMBER().contains(filterlist2DLTL.get(j).getACCOUNT_NUMBER())) {
+									filterlist2DLTL.set(j, i);
+									i.setLINK(null);
+								}
+							}
+						}
+						filterlistDLTLGTRnew = filterlistDLTLGTR;
+						filterlistDLTLGTRnew = filterlistDLTLGTRnew.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+						filterlist2DLTL.addAll(filterlistDLTLGTRnew);
+
+						///// ***********CASAOD LIST***********////
+						DepAcctBeanList.stream().filter(A -> A.getLINK().equals("GTR")).forEach(A -> {
+							A.getACCOUNT_NUMBER();
+							filterlistCASAODGTR.add(A);
+						});
+						DepAcctBeanList.removeAll(filterlistCASAODGTR);
+
+						/* filterlist1CASAOD = */ DepAcctBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getLINK().equals("O&J")))
+								.collect(Collectors.toList());
+
+						filterlist2CASAOD = DepAcctBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+
+						for (CASAodAcctDetails i : DepAcctBeanList) {
+							for (int j = 0; j < filterlist2CASAOD.size(); j++) {
+								if (i.getACCOUNT_NUMBER().contains(filterlist2CASAOD.get(j).getACCOUNT_NUMBER())) {
+									filterlist2CASAOD.set(j, i);
+									i.setLINK(null);
+								}
+							}
+						}
+
+						filterlistCASAODGTRnew = filterlistCASAODGTR;
+						filterlistCASAODGTRnew = filterlistCASAODGTRnew.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+						filterlist2CASAOD.addAll(filterlistCASAODGTRnew);
+
+						///// ***********TDRSTDR LIST***********////
+						TDRAcctBeanList.stream().filter(A -> A.getLINK().equals("GTR")).forEach(A -> {
+							A.getACCOUNT_NUMBER();
+
+							filterlistTDRGTR.add(A);
+						});
+						TDRAcctBeanList.removeAll(filterlistTDRGTR);
+
+						/* filterlist1TDRGTR = */ TDRAcctBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getLINK().equals("O&J")))
+								.collect(Collectors.toList());
+
+						filterlist2TDRGTR = TDRAcctBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+
+						for (TDR_STDRAcctDetails i : TDRAcctBeanList) {
+							for (int j = 0; j < filterlist2TDRGTR.size(); j++) {
+								if (i.getACCOUNT_NUMBER().contains(filterlist2TDRGTR.get(j).getACCOUNT_NUMBER())) {
+									filterlist2TDRGTR.set(j, i);
+									i.setLINK(null);
+								}
+							}
+						}
+						filterlistTDRGTRnew = filterlistTDRGTR;
+						filterlistTDRGTRnew = filterlistTDRGTRnew.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+						filterlist2TDRGTR.addAll(filterlistTDRGTRnew);
+
+						///// ***********CCOD LIST***********////
+
+						DepAcctODBeanList.stream().filter(A -> A.getLINK().equals("GTR")).forEach(A -> {
+							A.getACCOUNT_NUMBER();
+							filterlistCCODGTR.add(A);
+						});
+						DepAcctODBeanList.removeAll(filterlistCCODGTR);
+
+						/* filterlist1CCOD = */ DepAcctODBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getLINK().equals("O&J")))
+								.collect(Collectors.toList());
+
+						filterlist2CCOD = DepAcctODBeanList.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+
+						for (CCODAcctDetails i : DepAcctODBeanList) {
+							for (int j = 0; j < filterlist2CCOD.size(); j++) {
+								if (i.getACCOUNT_NUMBER().contains(filterlist2CCOD.get(j).getACCOUNT_NUMBER())) {
+									filterlist2CCOD.set(j, i);
+									i.setLINK(null);
+								}
+							}
+						}
+
+						filterlistCCODGTRnew = filterlistCCODGTR;
+						filterlistCCODGTRnew = filterlistCCODGTRnew.stream()
+								.filter(RestrictDuplication.distinctByKey(A -> A.getACCOUNT_NUMBER()))
+								.collect(Collectors.toList());
+						filterlist2CCOD.addAll(filterlistCCODGTRnew);
+
+					}
+
+				} else if (requestData != null) {
+					if (AcctNo.isEmpty()) {
+						logger.error("Reveiced account number is invalid,acct  num is: {}", AcctNo);
+						resp.setERROR_CODE("CB424");
+						resp.setERROR_DESCRIPTION(error.getProperty("CB424"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+						finalResponse = gson.toJson(resp);
+						customFilter(finalResponse);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"CB424", error.getProperty("CB424"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+					}
+					for (String j : AcctNo) {
+						try {
+							InvalidAccountDetails cbssixerr = new InvalidAccountDetails();
+
+							if (StringUtils.isNumeric(j)) {
+								if (j == null || j.length() > 17 || j.length() < 11) {
+									logger.error("Reveiced requestData is invalid,  received requestData is: {}",
+											requestData);
+									if (j.length() > 17) {
+										cbssixerr.setACCOUNT_NUMBER(j.substring(0, 17));
+									} else {
+										cbssixerr.setACCOUNT_NUMBER(j);
+									}
+									cbssixerr.setERROR_CODE("CB424");
+									cbssixerr.setERROR_DESCRIPTION(error.getProperty("CB424"));
+									invalidacctList.add(cbssixerr);
+									continue;
+								}
+								try {
+
+									accountNumber = calculateCheckDigit.AccountNumberWithoutCheckDigit(j);
+									accountNumber = stringUtils.leftPad(accountNumber, 16, "0");
+								} catch (RuleAccessTechnicalException e) {
+									logger.error(
+											"Reveiced AccountNumberWithoutCheckDigit ,  received requestData is: {}",
+											accountNumber);
+									if (j.length() > 17) {
+										cbssixerr.setACCOUNT_NUMBER(j.substring(0, 17));
+									} else {
+										cbssixerr.setACCOUNT_NUMBER(j);
+									}
+									cbssixerr.setERROR_CODE("0169");
+									cbssixerr.setERROR_DESCRIPTION(error.getProperty("0169"));
+									invalidacctList.add(cbssixerr);
+									continue;
+								}
+							} else {
+
+								logger.error("Reveiced accountNumber is invalid> ,  received requestData is: {}",
+										accountNumber);
+								if ((j == null) || j.isEmpty()) {
+									cbssixerr.setACCOUNT_NUMBER("");
+									cbssixerr.setERROR_CODE("CB424");
+									cbssixerr.setERROR_DESCRIPTION(error.getProperty("CB424"));
+									invalidacctList.add(cbssixerr);
+									continue;
+
+								} else {
+									if (!StringUtils.isNumeric(j)) {
+										if (j.length() > 17) {
+											cbssixerr.setACCOUNT_NUMBER(j.substring(0, 17));
+
+										} else {
+											cbssixerr.setACCOUNT_NUMBER(j);
+										}
+										cbssixerr.setERROR_CODE("CB424");
+										cbssixerr.setERROR_DESCRIPTION(error.getProperty("CB424"));
+										invalidacctList.add(cbssixerr);
+										continue;
+									} else {
+										if (j.length() > 17) {
+											cbssixerr.setACCOUNT_NUMBER(j.substring(0, 17));
+
+										} else {
+											cbssixerr.setACCOUNT_NUMBER(j);
+										}
+										cbssixerr.setERROR_CODE("CB424");
+										cbssixerr.setERROR_DESCRIPTION(error.getProperty("CB424"));
+										invalidacctList.add(cbssixerr);
+										continue;
+									}
+
+								}
+							}
+
+							String AcctNum = "";
+							AcctNum = calculateCheckDigit.AccountNumberWithoutCheckDigit(j);
+							AcctNum = stringUtils.leftPad(AcctNum, 16, "0");
+							List<Cusm> cusm = new ArrayList<Cusm>();
+							if(!syscScheduler.isNightEnabled()) {
+								cusm = cusmDetailDayRepo.findByCusmDetail(AcctNum);
+							}else if(syscScheduler.isNightDay()) {
+								cusm = cusmDetailNightRepo.findByCusmDetail(AcctNum);
+								if (cusm.isEmpty()) {
+									cusm = cusmDetailDayRepo.findByCusmDetail(AcctNum);
+								}
+							}else if(syscScheduler.isNightRef()) {
+								cusm = cusmDetailNightRepo.findByCusmDetail(AcctNum);
+								if (cusm.isEmpty()) {
+									cusm = cusmDetailRefRepo.findByCusmDetail(AcctNum);
+								}
+							}
+							
+							if (cusm.isEmpty()) {
+								logger.error("Reveiced cusm is empty,  received cusm is: {}", cusm);
+								cbssixerr.setACCOUNT_NUMBER(j);
+								cbssixerr.setERROR_CODE("0188");
+								cbssixerr.setERROR_DESCRIPTION(error.getProperty("0188"));
+								invalidacctList.add(cbssixerr);
+								continue;
+							} else {
+								if (!(cusm.get(0).getAcctsys().equals("DEP"))
+										&& !(cusm.get(0).getAcctsys().equals("LON"))) {
+									cbssixerr.setACCOUNT_NUMBER(j);
+									cbssixerr.setERROR_CODE("CB424");
+									cbssixerr.setERROR_DESCRIPTION(error.getProperty("CB424"));
+									invalidacctList.add(cbssixerr);
+									continue;
+								} else {
+									if (AccountType.equals("DL")) {
+										/******** DLTLOD List **********/
+										DltlAcctBean bormAccountFetch = new DltlAcctBean();
+										if (syscScheduler.isNightEnabled()) {
+
+											bormAccountFetch = lonacct.LONaccountFetchNight(AcctNum);
+
+										} else {
+											bormAccountFetch = lonacct.LONaccountFetchDay(AcctNum);
+
+										}
+										if (!(bormAccountFetch == null)) {
+											accttypeflag = true;
+											filterlist2DLTL.add(bormAccountFetch);
+										} else {
+											accttypeflag = false;
+										}
+										logger.info("bormAccountFetch>>> " + bormAccountFetch);
+									}
+									if (AccountType.equals("CO")) {
+										/******** CASACCOD List **********/
+										List<Invm> invm = new ArrayList<Invm>();
+										if(!syscScheduler.isNightEnabled()) {
+											invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+										}else if(syscScheduler.isNightDay()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}else if(syscScheduler.isNightRef()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmRefRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}
+										
+
+										if (!invm.isEmpty()) {
+											List<Depp> depp = new ArrayList<Depp>();
+											if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+												depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+											} else if (syscScheduler.isNightRef()) {
+												depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+											}
+											if (!depp.isEmpty()) {
+												if (depp.get(0).getOd_indicator().equals("Y")) {
+													CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+
+													/******** CASAOD List **********/
+													if (syscScheduler.isNightEnabled()) {
+														invmAccountFetch = depacct.DEPaccountFetchNight(AcctNum);
+													} else {
+														invmAccountFetch = depacct.DEPaccountFetchDay(AcctNum);
+
+													}
+													if (!(invmAccountFetch == null)) {
+														accttypeflag = true;
+														filterlist2CCOD.add(invmAccountFetch);
+													}
+
+													logger.info("invmAccountFetchAL>>> " + invmAccountFetch);
+												} else if (depp.get(0).getOd_indicator().equals("N")
+														&& !depp.get(0).getPpfFlag().equals("Y")
+														&& (depp.get(0).getAcctdesc().equals("Q")
+																|| depp.get(0).getAcctdesc().equals("S")
+																|| depp.get(0).getAcctdesc().equals("V"))) {
+													/******** CASAOD List **********/
+													CASAodAcctDetails invmAccountFetch = new CASAodAcctDetails();
+													if (syscScheduler.isNightEnabled()) {
+														invmAccountFetch = depacct.invmAccountFetchNight(AcctNum);
+													} else {
+														invmAccountFetch = depacct.invmAccountFetchDay(AcctNum);
+
+													}
+													if (!(invmAccountFetch == null)) {
+														accttypeflag = true;
+														filterlist2CASAOD.add(invmAccountFetch);
+													}
+													logger.info("invmAccountFetchAL>>> " + invmAccountFetch);
+												} else {
+													accttypeflag = false;
+												}
+
+											} else {
+												accttypeflag = false;
+											}
+										} else {
+											accttypeflag = false;
+										}
+									}
+									if (AccountType.equals("TD")) {
+										/******** TDR-STDR List **********/
+
+										List<Invm> invm = new ArrayList<Invm>();
+										
+										if(!syscScheduler.isNightEnabled()) {
+											invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+										}else if(syscScheduler.isNightDay()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}else if(syscScheduler.isNightRef()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmRefRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}
+									
+										if (!invm.isEmpty()) {
+											List<Depp> depp = new ArrayList<Depp>();
+											if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+												depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+											} else if (syscScheduler.isNightRef()) {
+												depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+											}
+											if (!depp.isEmpty()) {
+												if (depp.get(0).getAcctdesc().equals("T")
+														|| depp.get(0).getPpfFlag().equals("Y")) {
+													TDR_STDRAcctDetails invmAccountFetch = new TDR_STDRAcctDetails();
+													if (syscScheduler.isNightEnabled()) {
+														invmAccountFetch = depacct.invmAccountFetchTdNight(AcctNum);
+													} else {
+														invmAccountFetch = depacct.invmAccountFetchTdDay(AcctNum);
+
+													}
+													if (!(invmAccountFetch == null)) {
+														accttypeflag = true;
+														filterlist2TDRGTR.add(invmAccountFetch);
+													}
+													logger.info("invmAccountFetch>>> " + invmAccountFetch);
+												} else {
+													accttypeflag = false;
+												}
+
+											} else {
+												accttypeflag = false;
+											}
+										} else {
+											accttypeflag = false;
+										}
+
+									}
+									if (AccountType.equals("DO")) {
+										/******** DLTLOD List **********/
+										if (cusm.get(0).getAcctsys().equals("LON")) {
+											DltlAcctBean bormAccountFetch = new DltlAcctBean();
+											if (syscScheduler.isNightEnabled()) {
+												bormAccountFetch = lonacct.LONaccountFetchNight(AcctNum);
+											} else {
+												bormAccountFetch = lonacct.LONaccountFetchDay(AcctNum);
+
+											}
+											if (!(bormAccountFetch == null)) {
+												accttypeflag = true;
+												filterlist2DLTL.add(bormAccountFetch);
+											} else {
+												accttypeflag = false;
+											}
+											logger.info("bormAccountFetch>>> " + bormAccountFetch);
+										} else if (cusm.get(0).getAcctsys().equals("DEP")) {
+											List<Invm> invm = new ArrayList<Invm>();
+											if(!syscScheduler.isNightEnabled()) {
+												invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+											}else if(syscScheduler.isNightDay()) {
+												invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+												if (invm.isEmpty()) {
+													invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+												}
+											}else if(syscScheduler.isNightRef()) {
+												invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+												if (invm.isEmpty()) {
+													invm = invmRefRepo.findByInvm1Details("003" + AcctNum);
+												}
+											}
+										
+											if (!invm.isEmpty()) {
+												List<Depp> depp = new ArrayList<Depp>();
+												if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+													depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+												} else if (syscScheduler.isNightRef()) {
+													depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+												}
+												if (!depp.isEmpty()) {
+													if (depp.get(0).getOd_indicator().equals("Y")) {
+
+														CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+														if (syscScheduler.isNightEnabled()) {
+															invmAccountFetch = depacct.DEPaccountFetchNight(AcctNum);
+														} else {
+															invmAccountFetch = depacct.DEPaccountFetchDay(AcctNum);
+
+														}
+														if (!(invmAccountFetch == null)) {
+															accttypeflag = true;
+															filterlist2CCOD.add(invmAccountFetch);
+														}
+														logger.info("invmAccountFetch>>> " + invmAccountFetch);
+													} else {
+														accttypeflag = false;
+													}
+												} else {
+													accttypeflag = false;
+												}
+											} else {
+												accttypeflag = false;
+											}
+
+										}
+
+									}
+									
+									if (AccountType.equals("AL")) {
+
+										////////////////// CO///////////////////////
+
+										/******** CASACCOD List **********/
+										List<Invm> invm = new ArrayList<Invm>();
+										if(!syscScheduler.isNightEnabled()) {
+											invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+										}else if(syscScheduler.isNightDay()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}else if(syscScheduler.isNightRef()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmRefRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}
+										
+
+										if (!invm.isEmpty()) {
+											List<Depp> depp = new ArrayList<Depp>();
+											if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+												depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+											} else if (syscScheduler.isNightRef()) {
+												depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+											}
+											if (!depp.isEmpty()) {
+
+												if (depp.get(0).getOd_indicator().equals("Y")) {
+													CCODAcctDetails invmAccountFetch = new CCODAcctDetails();
+
+													/******** CASAOD List **********/
+													if (syscScheduler.isNightEnabled()) {
+														invmAccountFetch = depacct.DEPaccountFetchNight(AcctNum);
+													} else {
+														invmAccountFetch = depacct.DEPaccountFetchDay(AcctNum);
+
+													}
+													if (!(invmAccountFetch == null)) {
+														accttypeflag = true;
+														filterlist2CCOD.add(invmAccountFetch);
+													}
+													logger.info("invmAccountFetchAL>>> " + invmAccountFetch);
+												} else if (depp.get(0).getOd_indicator().equals("N")
+														&& !depp.get(0).getPpfFlag().equals("Y")
+														&& (depp.get(0).getAcctdesc().equals("Q")
+																|| depp.get(0).getAcctdesc().equals("S")
+																|| depp.get(0).getAcctdesc().equals("V"))) {
+													/******** CASAOD List **********/
+													CASAodAcctDetails invmAccountFetch = new CASAodAcctDetails();
+													if (syscScheduler.isNightEnabled()) {
+														invmAccountFetch = depacct.invmAccountFetchNight(AcctNum);
+													} else {
+														invmAccountFetch = depacct.invmAccountFetchDay(AcctNum);
+
+													}
+													if (!(invmAccountFetch == null)) {
+														accttypeflag = true;
+														filterlist2CASAOD.add(invmAccountFetch);
+													}
+													logger.info("invmAccountFetchAL>>> " + invmAccountFetch);
+												}
+											}
+										}
+										/////////////////////////////// TD//////////////////////////////////////
+										List<Invm> invm1 = new ArrayList<Invm>();
+										if(!syscScheduler.isNightEnabled()) {
+											invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+										}else if(syscScheduler.isNightDay()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}else if(syscScheduler.isNightRef()) {
+											invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+											if (invm.isEmpty()) {
+												invm = invmRefRepo.findByInvm1Details("003" + AcctNum);
+											}
+										}
+										
+										if (!invm.isEmpty()) {
+											List<Depp> depp = new ArrayList<Depp>();
+											if (syscScheduler.isNightDay() || !syscScheduler.isNightEnabled()) {
+												depp = deppDayRepo.findByDeppDetail(invm.get(0).getIntCat(),invm.get(0).getAcctType());
+											} else if (syscScheduler.isNightRef()) {
+												depp = deppRefRepo.findByDeppDetail(invm.get(0).getIntCat(), invm.get(0).getAcctType());
+											}
+
+											if (!depp.isEmpty()) {
+												if (depp.get(0).getAcctdesc().equals("T")
+														|| depp.get(0).getPpfFlag().equals("Y")) {
+													TDR_STDRAcctDetails invmAccountFetch = new TDR_STDRAcctDetails();
+													if (syscScheduler.isNightEnabled()) {
+														invmAccountFetch = depacct.invmAccountFetchTdNight(AcctNum);
+													} else {
+														invmAccountFetch = depacct.invmAccountFetchTdDay(AcctNum);
+
+													}
+													if (!(invmAccountFetch == null)) {
+														accttypeflag = true;
+														filterlist2TDRGTR.add(invmAccountFetch);
+													}
+													logger.info("invmAccountFetch>>> " + invmAccountFetch);
+												}
+											} else {
+												accttypeflag = false;
+											}
+										} else {
+											accttypeflag = false;
+										}
+										//////////////////// DO///////////////////////
+
+										if (cusm.get(0).getAcctsys().equals("LON")) {
+											DltlAcctBean bormAccountFetch1 = new DltlAcctBean();
+											if (syscScheduler.isNightEnabled()) {
+												bormAccountFetch1 = lonacct.LONaccountFetchNight(AcctNum);
+											} else {
+												bormAccountFetch1 = lonacct.LONaccountFetchDay(AcctNum);
+
+											}
+											if (!(bormAccountFetch1 == null)) {
+												accttypeflag = true;
+												filterlist2DLTL.add(bormAccountFetch1);
+											} else {
+												accttypeflag = false;
+											}
+											logger.info("bormAccountFetch>>> " + bormAccountFetch1);
+										} else if (cusm.get(0).getAcctsys().equals("DEP")) {
+											List<Invm> invm11 = new ArrayList<Invm>();
+											if(!syscScheduler.isNightEnabled()) {
+												invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+											}else if(syscScheduler.isNightDay()) {
+												invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+												if (invm.isEmpty()) {
+													invm = invmDayRepo.findByInvm1Details("003" + AcctNum);
+												}
+											}else if(syscScheduler.isNightRef()) {
+												invm = invmNightRepo.findByInvm1Details("003" + AcctNum);
+												if (invm.isEmpty()) {
+													invm = invmRefRepo.findByInvm1Details("003" + AcctNum);
+												}
+											}
+										}
+										
+										
+									}
+									if (!accttypeflag) {
+										cbssixerr.setACCOUNT_NUMBER(j);
+										cbssixerr.setERROR_CODE("CB429");
+										cbssixerr.setERROR_DESCRIPTION(error.getProperty("CB429"));
+										invalidacctList.add(cbssixerr);
+										continue;
+									}
+
+								}
+							}
+						} catch (ArrayIndexOutOfBoundsException | ArithmeticException | InputMismatchException
+								| IllegalStateException e) {
+							MSbalnceEnqResponse resp1 = new MSbalnceEnqResponse();
+							String ee = ExceptionUtils.getStackTrace(e);
+							logger.error("Exception{2}", e);
+							resp1.setERROR_CODE("0155");
+							resp1.setERROR_DESCRIPTION(error.getProperty("0155"));
+							resp1.setSOURCE_ID(SourceId);
+							resp1.setRESPONSE_STATUS("1");
+							resp1.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+							finalResponse = gson.toJson(resp1);
+							customFilter(finalResponse);
+							reqbeanstr = gson.toJson(reqbean).toString();
+							try {
+								migDetails.LogData("1", MigReqStr,
+										Base64.getEncoder().encodeToString((finalResponse + ">>" + ee).getBytes()),
+										remoteAddress, tellerNo, "0155", error.getProperty("0155"),
+										reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(),
+										msbalenq.getFail(), entryDate, CLIENT_IP);
+							} catch (RrnException | SrcException e1) {
+								logger.error("Something went wrong 6", e1);
+							}
+							if (filterFlag = true) {
+								return new ResponseEntity(finalResponse, HttpStatus.OK);
+							}
+						} catch (Exception e) {
+							MSbalnceEnqResponse resp1 = new MSbalnceEnqResponse();
+							String ee = ExceptionUtils.getStackTrace(e);
+							logger.error("Exception{1}", e);
+							resp1.setERROR_CODE("0155");
+							resp1.setERROR_DESCRIPTION(error.getProperty("0155"));
+							resp1.setSOURCE_ID(SourceId);
+							resp1.setRESPONSE_STATUS("1");
+							resp1.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+							finalResponse = gson.toJson(resp1);
+							customFilter(finalResponse);
+							reqbeanstr = gson.toJson(reqbean).toString();
+							try {
+								migDetails.LogData("1", MigReqStr,
+										Base64.getEncoder().encodeToString((finalResponse + ">>" + ee).getBytes()),
+										remoteAddress, tellerNo, "0155", error.getProperty("0155"),
+										reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(),
+										msbalenq.getFail(), entryDate, CLIENT_IP);
+							} catch (RrnException | SrcException e1) {
+								logger.error("Something went wrong 4", e1);
+							}
+							if (filterFlag = true) {
+								return new ResponseEntity(finalResponse, HttpStatus.OK);
+							}
+						}
+					}
+				} else {
+					logger.error("Received cust is not same as prim_acct,  received cust is: {1}");
+					resp.setERROR_CODE("CB423");
+					resp.setERROR_DESCRIPTION(error.getProperty("CB423"));
+					resp.setSOURCE_ID(SourceId);
+					resp.setRESPONSE_STATUS("1");
+					resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+					finalResponse = gson.toJson(resp);
+					reqbeanstr = gson.toJson(reqbean).toString();
+					migDetails.LogData("1", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+							remoteAddress, tellerNo, "CB423", error.getProperty("CB423"),
+							reqbean.getREQUEST_REFERENCE_NUMBER(), reqbean.getSOURCE_ID(), msbalenq.getFail(),
+							entryDate, CLIENT_IP);
+					if (filterFlag = true) {
+						return new ResponseEntity(finalResponse, HttpStatus.OK);
+					}
+				}
+
+				///////////////////////////// account base service///////////////////////////
+
+				if (accept != null && accept.contains("application/json")) {
+
+					resp.setCASA_ACCOUNT_DETAILS(filterlist2CASAOD);
+					resp.setTDRSTDR_ACCOUNT_DETAILS(filterlist2TDRGTR);
+					resp.setDLTL_ACCOUNT_DETAILS(filterlist2DLTL);
+					resp.setCCOD_ACCOUNT_DETAILS(filterlist2CCOD);
+					if (invalidacctList == null) {
+						List<InvalidAccountDetails> invalidacctList1 = new ArrayList<>();
+
+						resp.setINVALID_ACCOUNT_DETAILS(invalidacctList1);
+					} else {
+						resp.setINVALID_ACCOUNT_DETAILS(invalidacctList);
+					}
+
+					if (filterlist2CASAOD.isEmpty() && filterlist2TDRGTR.isEmpty() && filterlist2DLTL.isEmpty()
+							&& filterlist2CCOD.isEmpty() && invalidacctList.isEmpty()) {
+						logger.error("Record not found");
+						resp.setERROR_CODE("0188");
+						resp.setERROR_DESCRIPTION(error.getProperty("0188"));
+						resp.setSOURCE_ID(SourceId);
+						resp.setRESPONSE_STATUS("1");
+						resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+
+						finalResponse = gson.toJson(resp);
+						reqbeanstr = gson.toJson(reqbean).toString();
+						migDetails.LogData("1", MigReqStr,
+								Base64.getEncoder().encodeToString((finalResponse).getBytes()), remoteAddress, tellerNo,
+								"0188", error.getProperty("0188"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+								reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+						if (filterFlag = true) {
+							return new ResponseEntity(finalResponse, HttpStatus.OK);
+						}
+
+					}
+
+					resp.setINVALID_ACCOUNT_DETAILS(invalidacctList);
+					resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+					resp.setSOURCE_ID(SourceId);
+					resp.setRESPONSE_STATUS("0");
+					resp.setERROR_CODE("");
+					resp.setERROR_DESCRIPTION("");
+					String jsonResponse = gson.toJson(resp).toString();
+					customFilter(jsonResponse);
+					finalResponse = gson.toJson(resp);
+					customFilter(finalResponse);
+					reqbeanstr = gson.toJson(reqbean).toString();
+					migDetails.LogData("0", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+							remoteAddress, tellerNo, " ", " ", reqbean.getREQUEST_REFERENCE_NUMBER(),
+							reqbean.getSOURCE_ID(), msbalenq.getSucc(), entryDate, CLIENT_IP);
+					if (filterFlag = true) {
+						return new ResponseEntity(jsonResponse, HttpStatus.OK);
+					}
+
+				}
+			} else {
+				resp.setERROR_CODE("CB461");
+				logger.error("Reveiced REQUEST DATA IS EMPTY, {}");
+				resp.setERROR_DESCRIPTION(error.getProperty("CB461"));
+				resp.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+				finalResponse = gson.toJson(resp);
+				customFilter(finalResponse);
+				reqbeanstr = gson.toJson(reqbean).toString();
+				migDetails.LogData("1", MigReqStr, Base64.getEncoder().encodeToString((finalResponse).getBytes()),
+						remoteAddress, tellerNo, "CB461", error.getProperty("CB461"), " ", " ", msbalenq.getFail(),
+						entryDate, CLIENT_IP);
+				if (filterFlag = true) {
+					return new ResponseEntity(finalResponse, HttpStatus.OK);
+				}
+			}
+		} catch (ArrayIndexOutOfBoundsException | ArithmeticException | InputMismatchException
+				| IllegalStateException e) {
+			MSbalnceEnqResponse resp1 = new MSbalnceEnqResponse();
+			String ee = ExceptionUtils.getStackTrace(e);
+			logger.error("Exception{2}", e);
+			resp1.setERROR_CODE("0155");
+			resp1.setERROR_DESCRIPTION(error.getProperty("0155"));
+			resp1.setSOURCE_ID(SourceId);
+			resp1.setRESPONSE_STATUS("1");
+			resp1.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+			finalResponse = gson.toJson(resp1);
+			customFilter(finalResponse);
+			reqbeanstr = gson.toJson(reqbean).toString();
+			try {
+				migDetails.LogData("1", MigReqStr,
+						Base64.getEncoder().encodeToString((finalResponse + ">>" + ee).getBytes()), remoteAddress,
+						tellerNo, "0155", error.getProperty("0155"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+						reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+			} catch (RrnException | SrcException e1) {
+				logger.error("Something went wrong 6", e1);
+			}
+			if (filterFlag = true) {
+				return new ResponseEntity(finalResponse, HttpStatus.OK);
+			}
+		} catch (Exception e) {
+			MSbalnceEnqResponse resp1 = new MSbalnceEnqResponse();
+			String ee = ExceptionUtils.getStackTrace(e);
+			logger.error("Exception{3}", e);
+			resp1.setERROR_CODE("0155");
+			resp1.setERROR_DESCRIPTION(error.getProperty("0155"));
+			resp1.setSOURCE_ID(SourceId);
+			resp1.setRESPONSE_STATUS("1");
+			resp1.setREQUEST_REFERENCE_NUMBER(ReqRefNo);
+			finalResponse = gson.toJson(resp1);
+			customFilter(finalResponse);
+			reqbeanstr = gson.toJson(reqbean).toString();
+			try {
+				migDetails.LogData("1", MigReqStr,
+						Base64.getEncoder().encodeToString((finalResponse + ">>" + ee).getBytes()), remoteAddress,
+						tellerNo, "0155", error.getProperty("0155"), reqbean.getREQUEST_REFERENCE_NUMBER(),
+						reqbean.getSOURCE_ID(), msbalenq.getFail(), entryDate, CLIENT_IP);
+			} catch (RrnException | SrcException e1) {
+				logger.error("Something went wrong 8", e1);
+			}
+			if (filterFlag = true) {
+				return new ResponseEntity(finalResponse, HttpStatus.OK);
+			}
+		} finally {
+			Duration timeElapsed = Duration.between(time, Instant.now());
+			long milliseconds = timeElapsed.toMillis();
+			logger.info("[Request : {/msbalance-enq} ]" + "[RRN: " + reqbean.getREQUEST_REFERENCE_NUMBER() + "]"
+					+ "[ResponseTime :" + milliseconds + " Milliseconds]");
+		}
+		return null;
+	}
+
+	private static final boolean customFilter(String input) {
+
+		String reg = "!~`#%&;*<>=@$()+/?^|";
+		String str = input;
+		for (int i = 0; i < reg.length(); i++) {
+			if (str.contains(reg.charAt(i) + "") && !(input.length() < 50000)) {
+				filterFlag = false;
+			} else {
+				filterFlag = true;
+			}
+		}
+
+		return filterFlag;
+
+	}
+
+}
