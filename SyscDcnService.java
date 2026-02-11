@@ -1,4 +1,3 @@
-
 package com.example.sysc;
 
 import oracle.jdbc.OracleConnection;
@@ -6,7 +5,6 @@ import oracle.jdbc.OracleStatement;
 import oracle.jdbc.dcn.DatabaseChangeEvent;
 import oracle.jdbc.dcn.DatabaseChangeListener;
 import oracle.jdbc.dcn.DatabaseChangeRegistration;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -19,12 +17,16 @@ import java.util.Properties;
 @Service
 public class SyscDcnService {
 
-    @Autowired
-    private DataSource dataSource;
+    private final DataSource dataSource;
 
     private volatile String currentMode = "DAY";
 
     private OracleConnection dcnConnection;
+
+    // ✅ Constructor Injection (BEST PRACTICE)
+    public SyscDcnService(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
 
     @PostConstruct
     public void init() {
@@ -50,7 +52,7 @@ public class SyscDcnService {
         dcr.addListener(new DatabaseChangeListener() {
             @Override
             public void onDatabaseChangeNotification(DatabaseChangeEvent event) {
-                System.out.println("SYSC table changed! Refreshing...");
+                System.out.println("🔥 SYSC changed, refreshing...");
                 refreshSysc();
             }
         });
@@ -67,7 +69,7 @@ public class SyscDcnService {
         rs.close();
         stmt.close();
 
-        System.out.println("DCN Registered Successfully for SYSC_TABLE");
+        System.out.println("✅ DCN Registered Successfully");
     }
 
     private synchronized void refreshSysc() {
@@ -92,7 +94,7 @@ public class SyscDcnService {
                     currentMode = "NIGHT_DAY";
                 }
 
-                System.out.println("SYSC Mode Updated To: " + currentMode);
+                System.out.println("✅ Mode Updated To: " + currentMode);
             }
 
         } catch (Exception e) {
