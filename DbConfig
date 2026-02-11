@@ -1,0 +1,23 @@
+package com.example.sysc;
+
+import oracle.jdbc.pool.OracleDataSource;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import javax.sql.DataSource;
+
+@Configuration
+public class DbConfig {
+
+    @Bean
+    public DataSource dataSource() throws Exception {
+
+        OracleDataSource ods = new OracleDataSource();
+
+        ods.setURL("jdbc:oracle:thin:@//HOST:PORT/SERVICE_NAME");
+        ods.setUser("USERNAME");
+        ods.setPassword("PASSWORD");
+
+        return ods;
+    }
+}
