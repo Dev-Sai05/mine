@@ -1,0 +1,193 @@
+package com.tcs.bancs.microservices.services;
+
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Properties;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Vector;
+
+import javax.sql.rowset.serial.SerialException;
+import javax.transaction.Transactional;
+import javax.validation.Valid;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+
+import com.jcraft.jsch.ChannelSftp;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
+import com.jcraft.jsch.SftpException;
+import com.tcs.bancs.microservices.config.CacheConfig;
+import com.tcs.bancs.microservices.configuration.PropertyLoader;
+import com.tcs.bancs.microservices.exception.RrnException;
+import com.tcs.bancs.microservices.exception.SrcException;
+import com.tcs.bancs.microservices.impl.DtlFileDetailsRepositoryImpl;
+import com.tcs.bancs.microservices.impl.MstFileStatTableUpdRepositoryImpl;
+import com.tcs.bancs.microservices.reqbean.IN055A_RequestBean;
+import com.tcs.bancs.microservices.util.DBProcess;
+import com.tcs.bancs.microservices.util.FrameworkConstants;
+
+@Component
+public class mainSFGCall {
+
+	@Autowired
+	DBProcess dbprocess;
+	
+	@Value("${sftp.host}")
+	private String sftpHost;
+
+	@Value("${sftp.port}")
+	private int sftpPort;
+
+	@Value("${sftp.user}")
+	private String sftpUser;
+
+	@Value("${sftp.directory}")
+	private String sftpDirectory;
+	
+	@Autowired
+	private MstFileStatTableUpdRepositoryImpl mstimplrepo;
+	
+	@Autowired
+	private DtlFileDetailsRepositoryImpl dtlrefimpl;
+	
+	@PersistenceContext
+	private EntityManager entityManager;
+
+    static Logger logger = LoggerFactory.getLogger(mainSFGCall.class);
+    
+	private static String HOSTprivateKeyPath=CacheConfig.frameworkConfigProperties.getProperty("microservices.aggregator.framework.HOSTprivateKeyPath");
+	
+    @SuppressWarnings("unchecked")
+	@CrossOrigin
+    public String uploadJsonToNfs(String accountNo, String jsonResponse, String reqRefNo,String srcID,String file_ref_name, @Valid IN055A_RequestBean reqbean,String date) throws InterruptedException, SerialException, SQLException, IOException, RrnException, SrcException{
+    	
+        String errno = new String();
+    	String reqrefno=reqbean.getReferenceNumber();
+    	String acct=reqbean.getAcct_number();
+    	acct=acct.substring(acct.length()-11);
+    	Session session = null;
+		ChannelSftp channelSftp = null;
+    	JSch jsch = new JSch();
+    	try {
+    		try
+    		{
+    			jsch.addIdentity(HOSTprivateKeyPath);
+    			System.out.println("after host private path added");
+    		}
+    		catch (Exception e) {
+    			logger.info("exception in add identity : "+ reqRefNo);
+			}
+			session = jsch.getSession(sftpUser, sftpHost, sftpPort);
+	    	session.setConfig("StrictHostKeyChecking", "no");
+	    	session.connect();
+	    	channelSftp = (ChannelSftp) session.openChannel("sftp");
+	    	channelSftp.connect();
+	    	Vector<ChannelSftp.LsEntry> filenames;
+			try {
+				filenames = channelSftp.ls(sftpDirectory);
+				
+				String fullpath = sftpDirectory;
+				String destfilename=fullpath+"//"+file_ref_name;
+				createFolderIfNotExists(channelSftp, fullpath);
+				
+				if(fullpath.endsWith("/"))
+				{
+					fullpath=fullpath.substring(0, fullpath.length()-1);
+				}
+				logger.info("Trying to save into path");
+				try
+				{
+					channelSftp.cd(fullpath);
+				}
+				catch(SftpException e)
+				{
+					channelSftp.mkdir(fullpath);
+					logger.info("New Directory Created");
+				}
+				
+				createFolderIfNotExists(channelSftp, fullpath);
+				
+				try
+				{
+					// Save in DB
+				InputStream inputStream = new ByteArrayInputStream(jsonResponse.getBytes());
+				channelSftp.put(inputStream, destfilename);
+				logger.info("Successfully Uploaded");
+
+				}
+				catch (SftpException e) {
+					errno = "VC003";
+					logger.info("Error in uploading to SFTP 1 : channelSftp"+ reqRefNo);
+					dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name, acct, file_ref_name, "F", date, "FILE GENERATION FAILED");	
+				}
+				
+				//Updating record details to MST_FILE_STAT
+				mstimplrepo.insertMstFileStat(srcID, reqrefno, file_ref_name, acct, "S");
+			    dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name,acct, file_ref_name, "S", date, "FILE GENERATED SUCCESSFULLY");
+
+				
+			} 
+			catch (SftpException e) {
+				errno = "VC003";
+				e.printStackTrace();
+				logger.info("Error in uploading to SFTP 2" + reqRefNo);
+				dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name,acct, file_ref_name, "F", date, "FILE GENERATION FAILED");					
+			} 	 
+		} catch (JSchException e) {
+			errno = "VC003";
+			logger.info("Connection Error " + reqRefNo);
+			dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name, acct, file_ref_name, "F", date, "FILE GENERATION FAILED");			
+			
+		} 
+    	finally {
+	        if (channelSftp != null && channelSftp.isConnected()) {
+	            channelSftp.disconnect();
+	            logger.info("SFTP Channel Disconnected");
+	        }
+	        if (session != null && session.isConnected()) {
+	            session.disconnect();
+	            logger.info("SFTP Session Disconnected");
+	        }			
+		}
+    	
+		return (errno=="VC003") ? "VC003" : "0000";
+    }
+ 
+    public void createFolderIfNotExists(ChannelSftp channelSftp, String path) throws SftpException
+    {
+    	String[] folders = path.split("/");
+    	String currentPath ="";
+    	for(String i:folders)
+    	{
+    		if(i.length() ==0)
+    			continue;
+    		currentPath+="/"+i;
+    		try
+    		{
+    			channelSftp.cd(currentPath);
+    		}
+    		catch(SftpException e)
+    		{
+    			channelSftp.mkdir(currentPath);
+    			logger.info("Created Missing Folder");
+    			channelSftp.cd(currentPath);
+    		}
+    	}
+    }
+    
+    }
