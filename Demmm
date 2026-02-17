@@ -1,0 +1,234 @@
+package com.tcs.bancs.microservices.services;
+
+import com.jcraft.jsch.ChannelSftp;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
+import com.jcraft.jsch.SftpException;
+import com.tcs.bancs.microservices.config.CacheConfig;
+import com.tcs.bancs.microservices.exception.RrnException;
+import com.tcs.bancs.microservices.exception.SrcException;
+import com.tcs.bancs.microservices.impl.DtlFileDetailsRepositoryImpl;
+import com.tcs.bancs.microservices.impl.MstFileStatTableUpdRepositoryImpl;
+import com.tcs.bancs.microservices.reqbean.IN055A_RequestBean;
+import com.tcs.bancs.microservices.util.DBProcess;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.util.Vector;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
+import javax.sql.rowset.serial.SerialException;
+import javax.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.CrossOrigin;
+
+@Component
+public class mainSFGCall {
+  @Autowired
+  DBProcess dbprocess;
+  
+  @Value("${sftp.host}")
+  private String sftpHost;
+  
+  @Value("${sftp.port}")
+  private int sftpPort;
+  
+  @Value("${sftp.user}")
+  private String sftpUser;
+  
+  @Value("${sftp.directory}")
+  private String sftpDirectory;
+  
+  @Autowired
+  private MstFileStatTableUpdRepositoryImpl mstimplrepo;
+  
+  @Autowired
+  private DtlFileDetailsRepositoryImpl dtlrefimpl;
+  
+  @PersistenceContext
+  private EntityManager entityManager;
+  
+  static Logger logger = LoggerFactory.getLogger(mainSFGCall.class);
+  
+  private static String HOSTprivateKeyPath = CacheConfig.frameworkConfigProperties.getProperty("microservices.aggregator.framework.HOSTprivateKeyPath");
+  
+  @CrossOrigin
+  public String uploadJsonToNfs(String accountNo, String jsonResponse, String reqRefNo, String srcID, String file_ref_name, @Valid IN055A_RequestBean reqbean, String date) throws InterruptedException, SerialException, SQLException, IOException, RrnException, SrcException {
+    String errno = new String();
+    String reqrefno = reqbean.getReferenceNumber();
+    String acct = reqbean.getAcct_number();
+    acct = acct.substring(acct.length() - 11);
+    Session session = null;
+    ChannelSftp channelSftp = null;
+    JSch jsch = new JSch();
+    try {
+      try {
+        jsch.addIdentity(HOSTprivateKeyPath);
+        System.out.println("after host private path added Private Key authentication Successful");
+      } catch (Exception e) {
+        logger.info("Private Key authentication Failed , exception in add identity : " + reqRefNo + " " + e.getMessage());
+      } 
+      logger.info(" Trying to get session - Before - 1");
+      session = jsch.getSession(this.sftpUser, this.sftpHost, this.sftpPort);
+      logger.info("got the session - After - 1");
+      logger.info("trying to set configuration - Before - 2");
+      session.setConfig("StrictHostKeyChecking", "no");
+      logger.info("configuration done - After - 2");
+      logger.info("trying to connect the session - Before - 3");
+      session.connect();
+      logger.info("connection establishment done - After - 3");
+      logger.info("trying to open the channel - Before - 4");
+      channelSftp = (ChannelSftp)session.openChannel("sftp");
+      logger.info("channel opened - After - 4");
+      logger.info("trying to connect sftp channel - Before - 5");
+      channelSftp.connect();
+      logger.info("channel sftp connection establishment done - After - 5");
+      try {
+        Vector<ChannelSftp.LsEntry> filenames = channelSftp.ls(this.sftpDirectory);
+        String fullpath = this.sftpDirectory;
+        String destfilename = String.valueOf(fullpath) + "//" + file_ref_name;
+        createFolderIfNotExists(channelSftp, fullpath);
+        if (fullpath.endsWith("/"))
+          fullpath = fullpath.substring(0, fullpath.length() - 1); 
+        logger.info("Trying to save into path");
+        try {
+          channelSftp.cd(fullpath);
+        } catch (SftpException e) {
+          channelSftp.mkdir(fullpath);
+          logger.info("New Directory Created");
+        } 
+        createFolderIfNotExists(channelSftp, fullpath);
+        try {
+          long uploadEndTime;
+          logger.info("========== FILE UPLOAD DEBUG START ==========");
+          logger.info("Thread Name : {}", Thread.currentThread().getName());
+          logger.info("Current Time : {}", LocalDateTime.now());
+          logger.info("Requested Reference No : {}", reqRefNo);
+          logger.info("Account Number (Last 11) : {}", acct);
+          logger.info("SFTP Host : {}", this.sftpHost);
+          logger.info("SFTP Port : {}", Integer.valueOf(this.sftpPort));
+          logger.info("SFTP Directory : {}", fullpath);
+          logger.info("Destination Filename : {}", file_ref_name);
+          logger.info("Full Remote Path : {}", destfilename);
+          logger.info("Session Connected ? {}", Boolean.valueOf((session != null && session.isConnected())));
+          logger.info("Channel Connected ? {}", Boolean.valueOf((channelSftp != null && channelSftp.isConnected())));
+          if (jsonResponse == null) {
+            logger.error("jsonResponse is NULL. Aborting upload.");
+            throw new IllegalStateException("jsonResponse is NULL");
+          } 
+          logger.info("JSON Length (characters) : {}", Integer.valueOf(jsonResponse.length()));
+          int previewLength = Math.min(300, jsonResponse.length());
+          logger.info("JSON Preview (first {} chars) : {}", Integer.valueOf(previewLength), jsonResponse.substring(0, previewLength));
+          byte[] fileBytes = jsonResponse.getBytes();
+          logger.info("File Byte Length BEFORE upload : {}", Integer.valueOf(fileBytes.length));
+          Runtime runtime = Runtime.getRuntime();
+          logger.info("JVM Free Memory : {}", Long.valueOf(runtime.freeMemory()));
+          logger.info("JVM Total Memory : {}", Long.valueOf(runtime.totalMemory()));
+          logger.info("JVM Max Memory : {}", Long.valueOf(runtime.maxMemory()));
+          if (fileBytes.length == 0)
+            logger.error("File content is EMPTY before upload!"); 
+          long uploadStartTime = System.currentTimeMillis();
+          Exception exception1 = null, exception2 = null;
+          try {
+            InputStream inputStream = new ByteArrayInputStream(fileBytes);
+            try {
+              logger.info("Uploading file to SFTP...");
+              logger.info("InputStream Available Bytes BEFORE put(): {}", Integer.valueOf(inputStream.available()));
+              channelSftp.put(inputStream, destfilename);
+              logger.info("Upload command executed successfully.");
+              logger.info("InputStream Available Bytes AFTER put(): {}", Integer.valueOf(inputStream.available()));
+            } finally {
+              if (inputStream != null)
+                inputStream.close(); 
+            } 
+          } finally {
+            exception2 = null;
+            if (exception1 == null) {
+              exception1 = exception2;
+            } else if (exception1 != exception2) {
+              exception1.addSuppressed(exception2);
+            } 
+          } 
+          try {
+            logger.info("Verifying file on remote server...");
+            Vector<ChannelSftp.LsEntry> list = channelSftp.ls(destfilename);
+            if (list != null && !list.isEmpty()) {
+              ChannelSftp.LsEntry entry = list.get(0);
+              long remoteSize = entry.getAttrs().getSize();
+              logger.info("File FOUND on SFTP.");
+              logger.info("Remote File Size AFTER upload : {} bytes", Long.valueOf(remoteSize));
+              logger.info("Remote Permissions : {}", entry.getAttrs().getPermissionsString());
+              logger.info("Remote Last Modified (epoch) : {}", Integer.valueOf(entry.getAttrs().getMTime()));
+              if (remoteSize == 0L) {
+                logger.error(" ALERT: File uploaded but size is 0 KB on server!");
+              } else if (remoteSize != fileBytes.length) {
+                logger.error(" SIZE MISMATCH! Local Bytes: {} | Remote Bytes: {}", Integer.valueOf(fileBytes.length), Long.valueOf(remoteSize));
+              } else {
+                logger.info(" File uploaded successfully with exact size match.");
+              } 
+            } else {
+              logger.error(" File NOT FOUND after upload!");
+            } 
+          } catch (Exception verifyEx) {
+            logger.error("File verification failed on remote server: {}", verifyEx.getMessage(), verifyEx);
+          } 
+          logger.info("========== FILE UPLOAD DEBUG END ==========");
+        } catch (SftpException e) {
+          errno = "VC003";
+          logger.info("Error in uploading to SFTP 1 : channelSftp" + reqRefNo);
+          this.dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name, acct, file_ref_name, "F", date, "FILE GENERATION FAILED");
+        } 
+        this.mstimplrepo.insertMstFileStat(srcID, reqrefno, file_ref_name, acct, "S");
+        this.dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name, acct, file_ref_name, "S", date, "FILE GENERATED SUCCESSFULLY");
+      } catch (SftpException e) {
+        errno = "VC003";
+        e.printStackTrace();
+        logger.info("Error in uploading to SFTP 2" + reqRefNo + " " + e.getMessage());
+        this.dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name, acct, file_ref_name, "F", date, "FILE GENERATION FAILED");
+      } 
+    } catch (JSchException e) {
+      errno = "VC003";
+      logger.info("Connection Error " + reqRefNo + " " + e.getMessage());
+      this.dtlrefimpl.DtlLogData(srcID, reqRefNo, file_ref_name, acct, file_ref_name, "F", date, "FILE GENERATION FAILED");
+    } finally {
+      if (channelSftp != null && channelSftp.isConnected()) {
+        channelSftp.disconnect();
+        logger.info("SFTP Channel Disconnected");
+      } 
+      if (session != null && session.isConnected()) {
+        session.disconnect();
+        logger.info("SFTP Session Disconnected");
+      } 
+    } 
+    return (errno == "VC003") ? "VC003" : "0000";
+  }
+  
+  public void createFolderIfNotExists(ChannelSftp channelSftp, String path) throws SftpException {
+    String[] folders = path.split("/");
+    String currentPath = "";
+    byte b;
+    int i;
+    String[] arrayOfString1;
+    for (i = (arrayOfString1 = folders).length, b = 0; b < i; ) {
+      String str = arrayOfString1[b];
+      if (str.length() != 0) {
+        currentPath = String.valueOf(currentPath) + "/" + str;
+        try {
+          channelSftp.cd(currentPath);
+        } catch (SftpException e) {
+          channelSftp.mkdir(currentPath);
+          logger.info("Created Missing Folder");
+          channelSftp.cd(currentPath);
+        } 
+      } 
+      b++;
+    } 
+  }
+}
