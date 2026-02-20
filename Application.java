@@ -11,3 +11,22 @@ public class Application {
         SpringApplication.run(Application.class, args);
     }
 }
+
+
+Uday - B - 3.7 - 4.4
+
+Pavan - B - 3.7 - 4.4
+
+Shiphrah - C - 3.4
+
+Poorna - C - 3.5
+
+Balaji - C - 3.5
+
+Mani - 
+
+Rohit - 
+
+Niharika - 
+
+Naveen - 
